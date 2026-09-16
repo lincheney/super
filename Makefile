@@ -13,3 +13,7 @@ public/hostplus.json:
 australiansuper: public/australiansuper.csv ;
 public/australiansuper.csv:
 	curl 'https://www.australiansuper.com/api/graphs/annualrates/graph/download/super' -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0' --compressed --fail -o $@
+
+unisuper: public/unisuper/ ;
+public/unisuper/:
+	bash extract-unisuper.sh
