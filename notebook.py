@@ -16,7 +16,7 @@ def _():
     import re
     from functools import partial
 
-    return alt, csv, datetime, itertools, json, math, mo, re
+    return alt, csv, datetime, itertools, json, mo, partial, re
 
 
 @app.cell
@@ -52,9 +52,9 @@ def cumproduct(values):
 
 
 @app.cell
-def load_hostplus(json, mo):
-    _file = mo.notebook_location()/'public'/'hostplus.json'
-    hostplus_raw = json.loads(read_file(_file))
+def load_hostplus(csv, mo):
+    _file = mo.notebook_location()/'public'/'hostplus.tsv'
+    hostplus_raw = list(csv.DictReader(read_file(_file).decode().splitlines(), delimiter='\t'))
     return (hostplus_raw,)
 
 
@@ -63,12 +63,12 @@ def parse_hostplus(datetime, hostplus_raw, itertools, mo):
     _data = [{
 
         'fund': 'hostplus',
-        'name': f'hostplus-{_x['OptionName']}',
-        'value': 1+_x['Return']/100 if _x['Return'] is not None else None,
-        'return': _x['Return'],
-        'date': datetime.datetime.strptime(_x['MonthEndDate'].split('T')[0], '%Y-%m-%d'),
+        'name': f'hostplus-{_x['name']}',
+        'value': 1+float(_x['return'])/100 if _x['return'] else None,
+        'return': _x['return'],
+        'date': datetime.datetime.strptime(_x['date'].split('T')[0], '%Y-%m-%d'),
 
-    } for _x in hostplus_raw['msg']['MonthlyOptions']]
+    } for _x in hostplus_raw]
 
     _data.sort(key=lambda x: x['name'])
     hostplus = []
@@ -90,11 +90,11 @@ def load_aussuper(csv, mo):
 
 
 @app.cell
-def load_unisuper(json, mo):
+def load_unisuper(csv, mo):
     _directory = mo.notebook_location()/'public'/'unisuper'
     _files = read_file(mo.notebook_location()/'public'/'unisuper.txt').decode().splitlines()
     unisuper_raw = {
-        _file.removesuffix('.json'): json.loads(read_file(_directory/_file))
+        _file.removesuffix('.tsv'): list(csv.DictReader(read_file(_directory/_file).decode().splitlines(), delimiter='\t'))
         for _file in _files
     }
     return (unisuper_raw,)
@@ -113,7 +113,7 @@ def load_sharesight(json, mo):
 
 
 @app.cell
-def parse_sharesight(datetime, sharesight_raw, mo):
+def parse_sharesight(datetime, mo, sharesight_raw):
     sharesight_prices = {}
     sharesight_payouts = {}
 
@@ -125,6 +125,7 @@ def parse_sharesight(datetime, sharesight_raw, mo):
                 for _date, _point in zip(_data['xAxis']['categories'], _data['series'])
             ]
             _data = [(b[0], b[1], b[1]/a[1]) for a, b in zip(_data[:-1], _data[1:])]
+            sharesight_prices[_ticker] = _data
         elif _kind == 'payouts':
             sharesight_payouts[_ticker] = _data
 
@@ -138,7 +139,7 @@ def parse_sharesight(datetime, sharesight_raw, mo):
         for _payout in _payouts
         for _date in [_payout['paid_on']]
     ])
-    return sharesight_payouts, sharesight_prices
+    return (sharesight_prices,)
 
 
 @app.cell
@@ -146,19 +147,19 @@ def parse_unisuper(datetime, itertools, mo, unisuper_raw):
     unisuper = []
 
     for _name, _chart in unisuper_raw.items():
-        _points = sorted(_chart['data'][0]['Data'], key=lambda x: x['Name'])
+        _chart = sorted(_chart, key=lambda x: x['date'])
         _monthly = []
-        for _month, _group in itertools.groupby(_points, key=lambda x: x['Name'].rpartition('-')[0]):
+        for _month, _group in itertools.groupby(_chart, key=lambda x: x['date'].rpartition('-')[0]):
             _group = list(_group)
-            _monthly.append((_group[0], float(_group[-1]['Value'])))
+            _monthly.append((_group[0], float(_group[-1]['value'])))
 
-        _previous = float(_monthly[0][0]['Value'])
+        _previous = float(_monthly[0][0]['value'])
         for _point, _value in _monthly:
             unisuper.append({
                 'fund': 'unisuper',
                 'name': f'unisuper-{_name}',
                 'value': _value / _previous,
-                'date': datetime.datetime.strptime(_point['Name'], '%Y-%m-%d'),
+                'date': datetime.datetime.strptime(_point['date'], '%Y-%m-%d'),
             })
             _previous = _value
 
@@ -188,11 +189,11 @@ def parse_aussuper(
 
         for _k, _v in _row.items():
             _k = re.sub(r'[^\w\s]', '', _k)
-            if _k != 'Financial Year' and _year < _min_daily_fy.get(_k, 9999):
+            if _k != 'Financial Year' and _v and _year < _min_daily_fy.get(_k, 9999):
                 aussuper.append({
                     'fund': 'aussuper',
                     'name': f'aussuper-{_k}',
-                    'value': 1+float(_v.strip('%'))/100 if _v else None,
+                    'value': 1+float(_v.strip('%'))/100,
                     'date': _date,
                 })
 
@@ -236,13 +237,9 @@ def _(admin_fees):
                     _balance /= _x['value']
                     _x['balance'] = _balance
 
-            for _x in _group:
-                _x['rev_balance'] = ending_balance.value - _x['balance']
-
         alldata.extend({
             'name': name,
             'balance': ending_balance.value,
-            'rev_balance': 0,
             'date': datetime.datetime(2027, 7, 1),
         } for name in set(x['name'] for x in alldata))
         return alldata
@@ -251,12 +248,12 @@ def _(admin_fees):
 
 
 @app.cell
-def _(aussuper, admin_fees, math, sharesight_prices):
+def _(admin_fees, aussuper, sharesight_prices):
     def make_memberdirect(code, *, ending_balance):
         import datetime
         import itertools
 
-        etf = sorted(sharesight_prices[code])
+        etf = sorted(sharesight_prices[code], reverse=True)
         _aussuper_returns = sorted(
             (_x['date'], _x['value'])
             for _x in aussuper
@@ -265,10 +262,14 @@ def _(aussuper, admin_fees, math, sharesight_prices):
         _aussuper_returns = [(*x, p) for x, p in zip(_aussuper_returns, cumproduct(_x[1] for _x in _aussuper_returns))]
 
         def interpolate(date):
-            next = min(i for i in _aussuper_returns if i['date'] >= date)
-            prev = max(i for i in _aussuper_returns if i['date'] <= date)
-            fraction = (date - next[0]) / (next[0] - prev[0])
-            return (next[2] / prev[2]) ** fraction
+            prev = max(i for i in _aussuper_returns if i[0] <= date)
+            next = min((i for i in _aussuper_returns if i[0] >= date), default=None)
+            next = next or _aussuper_returns[-1]
+            if prev[0] == next[0]:
+                fraction = 1
+            else:
+                fraction = (date - next[0]) / (next[0] - prev[0])
+            return prev[2] * ((next[2] / prev[2]) ** fraction)
 
         shares = ending_balance.value - 5000
         pooled = 5000
@@ -293,19 +294,28 @@ def _(aussuper, admin_fees, math, sharesight_prices):
                     'date': _x[0],
                     'balance': shares + pooled,
                 })
+        data.append({
+            'fund': 'aussuper',
+            'name': f'aussuper-memberdirect-{code}',
+            'balance': ending_balance.value,
+            'date': datetime.datetime(2027, 7, 1),
+        })
 
         return data
 
     return (make_memberdirect,)
 
+
 @app.cell
-def _():
+def _(make_memberdirect, partial):
     direct_investment = {
         'aussuper-memberdirect-VGS': partial(make_memberdirect, 'VGS'),
     }
+    return (direct_investment,)
+
 
 @app.cell
-def filter_rev_cumproduct(aussuper, hostplus, mo, unisuper):
+def filter_cumproduct(aussuper, direct_investment, hostplus, mo, unisuper):
     ending_balance = mo.ui.number(start=1, value=100_000, label="Ending balance")
     _options = sorted(set(x['name'] for x in hostplus + aussuper + unisuper) | (direct_investment.keys()))
     multiselect = mo.ui.multiselect(options=_options, label='Filter')
@@ -314,23 +324,27 @@ def filter_rev_cumproduct(aussuper, hostplus, mo, unisuper):
 
 
 @app.cell(hide_code=True)
-def rev_cumproduct_graph(
+def cumproduct_graph(
     alt,
     aussuper,
+    direct_investment,
     ending_balance,
     hostplus,
+    itertools,
     make_alldata,
     mo,
     multiselect,
     unisuper,
 ):
-    _data = [x for x in make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance) if not multiselect.value or x['name'] in multiselect.value]
+    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance)
+    _data.extend(itertools.chain.from_iterable(f(ending_balance=ending_balance) for f in direct_investment.values()))
+    _data = [x for x in _data if not multiselect.value or x['name'] in multiselect.value]
     chart = (
         alt.Chart(alt.InlineData(_data))
         .mark_line()
         .encode(
             x=alt.X("date:T", scale=alt.Scale(reverse=True)),
-            y='rev_balance:Q',
+            y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
             color='name:N',
         )
         .properties(width="container")
