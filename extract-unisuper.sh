@@ -21,12 +21,12 @@ done
 
 mkdir -p public/unisuper/
 while read -r url; do
-    echo "$url"
+    echo "$url" >&2
     name="$(basename "$url")"
     ff do browser.tabs.update "$tab" '{"url": "'$url'"}' >/dev/null
     sleep 2
     until data="$(.ff do dom.call '.tab.active figure' getAttribute data-chart '{"tabId": '$tab'}' | jq -re '.[0].result[0]')"; do
         sleep 1
     done
-    printf %s "$data" >"public/unisuper/$name.json"
+    printf %s "$data" | jq -re '["date", "value"], (.data[0].Data[] | [.Name, .Value]) | @tsv' >"public/unisuper/$name.tsv"
 done <<<"$hrefs"
