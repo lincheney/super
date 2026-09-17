@@ -99,6 +99,49 @@ def load_unisuper(json, mo):
 
 
 @app.cell
+def load_sharesight(json, mo):
+    _directory = mo.notebook_location()/'public'/'sharesight'
+    _files = read_file(mo.notebook_location()/'public'/'sharesight.txt').decode().splitlines()
+    sharesight_raw = {
+        _file.removesuffix('.json'): json.loads(read_file(_directory/_file))
+        for _file in _files
+        if _file
+    }
+    return (sharesight_raw,)
+
+
+@app.cell
+def parse_sharesight(datetime, sharesight_raw, mo):
+    sharesight_prices = {}
+    sharesight_payouts = {}
+
+    for _name, _data in sharesight_raw.items():
+        _ticker, _kind = _name.rsplit('-', 1)
+        if _kind == 'prices':
+            sharesight_prices[_ticker] = [
+                (
+                    datetime.datetime.strptime(_date, '%d %b %y'),
+                    _point['y2'],
+                )
+                for _date, _point in zip(_data['xAxis']['categories'], _data['series'])
+            ]
+        elif _kind == 'payouts':
+            sharesight_payouts[_ticker] = _data
+
+    mo.ui.table([
+        {
+            'ticker': _ticker,
+            'date': _date,
+            'amount_per_share': _payout['company_event']['amount_per_share'],
+        }
+        for _ticker, _payouts in sharesight_payouts.items()
+        for _payout in _payouts
+        for _date in [_payout['paid_on']]
+    ])
+    return sharesight_payouts, sharesight_prices
+
+
+@app.cell
 def parse_unisuper(datetime, itertools, mo, unisuper_raw):
     unisuper = []
 
