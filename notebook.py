@@ -17,6 +17,16 @@ def _():
     return alt, csv, datetime, itertools, json, mo, re
 
 
+@app.cell
+def admin_fees():
+    admin_fees = dict(
+        hostplus = dict(fixed = 78, asset = 0, asset_max = 0),
+        aussuper = dict(fixed = 52, asset = 0.12/100, asset_max = 600),
+        unisuper = dict(fixed = 0, asset = 2/100, asset_max = 96),
+    )
+    return (admin_fees,)
+
+
 @app.function
 def read_file(path):
     if '://' in str(path):
@@ -125,44 +135,41 @@ def parse_aussuper(
     return (aussuper,)
 
 
-@app.function
-def make_alldata(*args, ending_balance):
-    import itertools
-    import datetime
+@app.cell
+def _(admin_fees):
+    def make_alldata(*args, ending_balance):
+        import itertools
+        import datetime
 
-    alldata = sorted(itertools.chain.from_iterable(args), key=lambda x: (x['name'], -x['date'].timestamp()))
+        alldata = sorted(itertools.chain.from_iterable(args), key=lambda x: (x['name'], -x['date'].timestamp()))
 
-    for _key, _group in itertools.groupby(alldata, key=lambda x: x['name']):
-        _group = [x for x in _group if x['value'] is not None]
+        for _key, _group in itertools.groupby(alldata, key=lambda x: x['name']):
+            _group = [x for x in _group if x['value'] is not None]
 
-        _balance = ending_balance.value
-        for _k, _g in itertools.groupby(_group, key=lambda x: fy_of_date(x['date'])):
-            _g = list(_g)
-            _asset_fee = 0
-            for _x in _g:
-                if _key.startswith('hostplus'):
-                    # $78 per year
-                    _balance += 78 / len(_g)
-                elif _key.startswith('aussuper'):
-                    # $52 + min(600, 0.12%) per year
-                    _fee = min(0.12/100 * _balance / len(_g), 600 - _asset_fee)
-                    _balance += 52 / len(_g) + _fee
-                    _asset_fee += _fee
-                else:
-                    raise NotImplementedError(_key)
-                _balance /= _x['value']
-                _x['balance'] = _balance
+            _balance = ending_balance.value
+            for _k, _g in itertools.groupby(_group, key=lambda x: fy_of_date(x['date'])):
+                _g = list(_g)
+                _asset_fee_this_year = 0
+                for _x in _g:
+                    _admin_fees = admin_fees[_x['fund']]
+                    _asset_fee = min(_balance / len(_g) * _admin_fees['asset'], _admin_fees['asset_max'] - _asset_fee_this_year)
+                    _balance += _admin_fees['fixed'] / len(_g) + _asset_fee
+                    _asset_fee_this_year += _asset_fee
+                    _balance /= _x['value']
+                    _x['balance'] = _balance
 
-        for _x in _group:
-            _x['rev_balance'] = ending_balance.value - _x['balance']
+            for _x in _group:
+                _x['rev_balance'] = ending_balance.value - _x['balance']
 
-    alldata.extend({
-        'name': name,
-        'balance': ending_balance.value,
-        'rev_balance': 0,
-        'date': datetime.datetime(2027, 7, 1),
-    } for name in set(x['name'] for x in alldata))
-    return alldata
+        alldata.extend({
+            'name': name,
+            'balance': ending_balance.value,
+            'rev_balance': 0,
+            'date': datetime.datetime(2027, 7, 1),
+        } for name in set(x['name'] for x in alldata))
+        return alldata
+
+    return (make_alldata,)
 
 
 @app.cell
@@ -180,6 +187,7 @@ def rev_cumproduct_graph(
     aussuper,
     ending_balance,
     hostplus,
+    make_alldata,
     mo,
     multiselect,
 ):
