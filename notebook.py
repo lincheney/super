@@ -88,6 +88,42 @@ def load_aussuper(csv, mo):
 
 
 @app.cell
+def load_unisuper(json, mo):
+    _directory = mo.notebook_location()/'public'/'unisuper'
+    _files = read_file(mo.notebook_location()/'public'/'unisuper.txt').decode().splitlines()
+    unisuper_raw = {
+        _file.removesuffix('.json'): json.loads(read_file(_directory/_file))
+        for _file in _files
+    }
+    return (unisuper_raw,)
+
+
+@app.cell
+def parse_unisuper(datetime, itertools, mo, unisuper_raw):
+    unisuper = []
+
+    for _name, _chart in unisuper_raw.items():
+        _points = sorted(_chart['data'][0]['Data'], key=lambda x: x['Name'])
+        _monthly = []
+        for _month, _group in itertools.groupby(_points, key=lambda x: x['Name'].rpartition('-')[0]):
+            _group = list(_group)
+            _monthly.append((_group[0], float(_group[-1]['Value'])))
+
+        _previous = float(_monthly[0][0]['Value'])
+        for _point, _value in _monthly:
+            unisuper.append({
+                'fund': 'unisuper',
+                'name': f'unisuper-{_name}',
+                'value': _value / _previous,
+                'date': datetime.datetime.strptime(_point['Name'], '%Y-%m-%d'),
+            })
+            _previous = _value
+
+    mo.ui.table(unisuper)
+    return (unisuper,)
+
+
+@app.cell
 def parse_aussuper(
     aussuper_annual_raw,
     aussuper_daily_raw,
@@ -173,9 +209,9 @@ def _(admin_fees):
 
 
 @app.cell
-def filter_rev_cumproduct(aussuper, hostplus, mo):
+def filter_rev_cumproduct(aussuper, hostplus, mo, unisuper):
     ending_balance = mo.ui.number(start=1, value=100_000, label="Ending balance")
-    _options = sorted(set(x['name'] for x in hostplus + aussuper))
+    _options = sorted(set(x['name'] for x in hostplus + aussuper + unisuper))
     multiselect = mo.ui.multiselect(options=_options, label='Filter')
     mo.vstack([ending_balance, multiselect])
     return ending_balance, multiselect
@@ -190,8 +226,9 @@ def rev_cumproduct_graph(
     make_alldata,
     mo,
     multiselect,
+    unisuper,
 ):
-    _data = [x for x in make_alldata(aussuper, hostplus, ending_balance=ending_balance) if not multiselect.value or x['name'] in multiselect.value]
+    _data = [x for x in make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance) if not multiselect.value or x['name'] in multiselect.value]
     chart = (
         alt.Chart(alt.InlineData(_data))
         .mark_line()
