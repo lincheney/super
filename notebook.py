@@ -12,9 +12,11 @@ def _():
     import csv
     import datetime
     import itertools
+    import math
     import re
+    from functools import partial
 
-    return alt, csv, datetime, itertools, json, mo, re
+    return alt, csv, datetime, itertools, json, math, mo, re
 
 
 @app.cell
@@ -118,13 +120,11 @@ def parse_sharesight(datetime, sharesight_raw, mo):
     for _name, _data in sharesight_raw.items():
         _ticker, _kind = _name.rsplit('-', 1)
         if _kind == 'prices':
-            sharesight_prices[_ticker] = [
-                (
-                    datetime.datetime.strptime(_date, '%d %b %y'),
-                    _point['y2'],
-                )
+            _data = [
+                (datetime.datetime.strptime(_date, '%d %b %y'), _point['y2'],)
                 for _date, _point in zip(_data['xAxis']['categories'], _data['series'])
             ]
+            _data = [(b[0], b[1], b[1]/a[1]) for a, b in zip(_data[:-1], _data[1:])]
         elif _kind == 'payouts':
             sharesight_payouts[_ticker] = _data
 
@@ -200,7 +200,6 @@ def parse_aussuper(
     for _month, _group in itertools.groupby(sorted(aussuper_daily_raw, key=lambda x: x['Rate Date']), key=lambda x: x['Rate Date'].rpartition('-')[0]):
         _group = list(_group)
         _date = datetime.datetime.strptime(_group[0]['Rate Date'], '%Y-%m-%d')
-        _fy = fy_of_date(_date)
         for _k in _daily_names:
             _value = list(cumproduct(1+float(x[_k] or 0)/100 for x in _group))[-1]
             aussuper.append({
@@ -252,9 +251,63 @@ def _(admin_fees):
 
 
 @app.cell
+def _(aussuper, admin_fees, math, sharesight_prices):
+    def make_memberdirect(code, *, ending_balance):
+        import datetime
+        import itertools
+
+        etf = sorted(sharesight_prices[code])
+        _aussuper_returns = sorted(
+            (_x['date'], _x['value'])
+            for _x in aussuper
+            if _x['name'] == 'aussuper-International Shares' and _x['value'] is not None
+        )
+        _aussuper_returns = [(*x, p) for x, p in zip(_aussuper_returns, cumproduct(_x[1] for _x in _aussuper_returns))]
+
+        def interpolate(date):
+            next = min(i for i in _aussuper_returns if i['date'] >= date)
+            prev = max(i for i in _aussuper_returns if i['date'] <= date)
+            fraction = (date - next[0]) / (next[0] - prev[0])
+            return (next[2] / prev[2]) ** fraction
+
+        shares = ending_balance.value - 5000
+        pooled = 5000
+        data = []
+        prev_date = datetime.datetime(2027, 7, 1)
+        for _k, _g in itertools.groupby(etf, key=lambda x: fy_of_date(x[0])):
+            _g = list(_g)
+            _asset_fee_this_year = 0
+            for _x in _g:
+                _admin_fees = admin_fees['aussuper']
+                _asset_fee = min((shares + pooled) / len(_g) * _admin_fees['asset'], _admin_fees['asset_max'] - _asset_fee_this_year)
+                pooled += _admin_fees['fixed'] / len(_g) + _asset_fee
+                _asset_fee_this_year += _asset_fee
+                shares /= _x[2]
+
+                pooled *= interpolate(_x[0]) / interpolate(prev_date)
+                prev_date = _x[0]
+
+                data.append({
+                    'fund': 'aussuper',
+                    'name': f'aussuper-memberdirect-{code}',
+                    'date': _x[0],
+                    'balance': shares + pooled,
+                })
+
+        return data
+
+    return (make_memberdirect,)
+
+@app.cell
+def _():
+    direct_investment = {
+        'aussuper-memberdirect-VGS': partial(make_memberdirect, 'VGS'),
+    }
+
+@app.cell
 def filter_rev_cumproduct(aussuper, hostplus, mo, unisuper):
     ending_balance = mo.ui.number(start=1, value=100_000, label="Ending balance")
-    _options = sorted(set(x['name'] for x in hostplus + aussuper + unisuper))
+    _options = sorted(set(x['name'] for x in hostplus + aussuper + unisuper) | (direct_investment.keys()))
     multiselect = mo.ui.multiselect(options=_options, label='Filter')
     mo.vstack([ending_balance, multiselect])
     return ending_balance, multiselect
