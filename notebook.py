@@ -192,12 +192,8 @@ def load_aussuper(csv, mo):
 
 @app.cell(hide_code=True)
 def load_unisuper(csv, mo):
-    _directory = mo.notebook_location()/'public'/'unisuper'
-    _files = read_file(mo.notebook_location()/'public'/'unisuper.txt').decode().splitlines()
-    unisuper_raw = {
-        _file.removesuffix('.tsv'): list(csv.DictReader(read_file(_directory/_file).decode().splitlines(), delimiter='\t'))
-        for _file in _files
-    }
+    _file = mo.notebook_location()/'public'/'unisuper.tsv'
+    unisuper_raw = list(csv.DictReader(read_file(_file).decode().splitlines(), delimiter='\t'))
     return (unisuper_raw,)
 
 
@@ -248,7 +244,8 @@ def parse_sharesight(datetime, sharesight_raw):
 def parse_unisuper(datetime, itertools, mo, unisuper_raw):
     unisuper = []
 
-    for _name, _chart in unisuper_raw.items():
+    for _name, _chart_iter in itertools.groupby(sorted(unisuper_raw, key=lambda x: (x['name'], x['date'])), key=lambda x: x['name']):
+        _chart = list(_chart_iter)
         _chart = sorted(_chart, key=lambda x: x['date'])
         _monthly = []
         for _month, _group in itertools.groupby(_chart, key=lambda x: x['date'].rpartition('-')[0]):
