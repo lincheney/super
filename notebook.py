@@ -30,7 +30,7 @@ def admin_fees():
         hostplus = dict(fixed = 78, asset = 0, asset_max = 0),
         aussuper = dict(fixed = 52, asset = 0.12/100, asset_max = 600),
         unisuper = dict(fixed = 0, asset = 2/100, asset_max = 96),
-        art = dict(fixed = 0, asset = 0, asset_max = 0),
+        art = dict(fixed = 1.1*52, asset = 0.1/100, asset_max = 0.1/100*500_000),
     )
     return (admin_fees,)
 
