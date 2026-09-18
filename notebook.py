@@ -89,11 +89,12 @@ def no_direct_investment(asset, state=None, purchase=0, numperiods=1, *, directi
 
 @app.function(hide_code=True)
 def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
-    if state is None:
-        return dict(num_shares=(purchase-5000)/asset['value'], pooled=5000, total=purchase)
-
     def brokerage(amount):
         return 10 + 0.08/100 * min(max(0, amount - 12_500), 50_000) + 0.04/100 * max(0, amount - 50_000)
+
+    if state is None:
+        shares, leftover = calc_brokerage(purchase - 5000, brokerage)
+        return dict(num_shares=shares/asset['value'], pooled=5000 + leftover, total=purchase)
 
     state['pooled'] -= 150 / numperiods * direction
 
@@ -113,14 +114,16 @@ def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
 @app.cell(hide_code=True)
 def _(hostplus):
     def choiceplus(asset, state=None, purchase=0, numperiods=1, *, direction):
+        def brokerage(amount):
+            return 13 + 0.1/100 * max(0, amount - 13_000)
+
         if state is None:
             pooled = max(purchase * 0.2, 2000)
-            return dict(num_shares=(purchase-pooled-200)/asset['value'], pooled=pooled, transaction=200, total=purchase)
+            shares, leftover = calc_brokerage(purchase - pooled - 200, brokerage)
+            return dict(num_shares=shares/asset['value'], pooled=pooled+leftover, transaction=200, total=purchase)
 
         def total():
             return state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
-        def brokerage(amount):
-            return 13 + 0.1/100 * max(0, amount - 13_000)
 
         # interest on transaction account, use the rate from the cash option
         interest = min((x for x in hostplus if x['name'] == 'hostplus-Cash'), key=lambda x: abs(x['date'] - asset['date']))
