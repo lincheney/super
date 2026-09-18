@@ -28,35 +28,24 @@ def admin_fees():
 
 
 @app.cell
-def _(alt):
-    def make_graph(data, *, height=500, x, y, group, **kwargs):
-        data = alt.InlineData(data)
+def _(aussuper, hostplus, itertools, unisuper):
+    def all_super_funds():
+        return itertools.chain(aussuper, hostplus, unisuper)
 
-        nearest = alt.selection_point(fields=[y.shorthand.split(':')[0]], nearest=True, on="pointerover", empty=False)
-        chart = (
-            alt.Chart(data)
-            .mark_line()
-            .encode(x=x, y=y, color=group)
+    return (all_super_funds,)
+
+
+@app.cell
+def _(alt, mo):
+    def make_graph(data, *, height=500, **kwargs):
+        return mo.ui.altair_chart(
+            alt.Chart(alt.InlineData(data))
+            # make the point bigger so its easier to trigger tooltip
+            .mark_line(point={'size': 100, 'stroke': 'transparent', 'filled': False})
+            .encode(**kwargs)
             .properties(width="container", height=height)
+            .interactive()
         )
-
-        selectors = alt.Chart(data).mark_point().encode(x=x, y=y, opacity=alt.value(0)).add_params(nearest)
-
-        text = chart.mark_text(align="center", fontWeight='bold', dy=-50).encode(
-            text=alt.when(nearest).then(group).otherwise(alt.value(" ")),
-        )
-        text_bg = text.mark_text(
-            align='center',
-            baseline='middle',
-            fontWeight='bold',
-            stroke='white',
-            strokeWidth=10,
-            strokeJoin='round',
-            opacity=0.8,
-            dy=-50,
-        )
-
-        return alt.layer(chart, selectors, text_bg, text).interactive()
 
     return (make_graph,)
 
@@ -343,7 +332,7 @@ def _(datetime, sharesight_payouts, sharesight_prices):
         direct_investment_func,
         *,
         direction,
-        ending_balance,
+        balance,
         initial_date=datetime.datetime(2027, 7, 1),
     ):
         import itertools
@@ -376,7 +365,7 @@ def _(datetime, sharesight_payouts, sharesight_prices):
         asset = [a for a in asset if a['date'] >= mindate]
         if not asset:
             return ()
-        state = direct_investment_func(asset[0], None, purchase=ending_balance, direction=direction)
+        state = direct_investment_func(asset[0], None, purchase=balance, direction=direction)
 
         data.append({
             'fund': name.partition('-')[0],
@@ -464,78 +453,80 @@ def _(aussuper, direct_investment, hostplus, mo, unisuper):
 
 @app.cell
 def cumproduct_graph(
+    all_super_funds,
     alt,
-    aussuper,
     direct_investment,
     ending_balance,
-    hostplus,
-    itertools,
-    make_alldata,
-    make_data,
-    mo,
-    selected_options,
-    unisuper,
-):
-    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance.value, direction=-1)
-    _data.extend(itertools.chain.from_iterable(make_data(
-        name,
-        ending_balance=ending_balance.value,
-        direction=-1,
-        **kwargs
-    ) for name, kwargs in direct_investment.items()))
-    _data = [x for x in _data if not selected_options.value or x['name'] in (y['value'] for y in selected_options.value)]
-
-    _chart = (
-        alt.Chart(alt.InlineData(_data))
-        .mark_line()
-        .encode(
-            x=alt.X("date:T", scale=alt.Scale(reverse=True)),
-            y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
-            color='name:N',
-        )
-        .properties(width="container", height=500)
-        .interactive()
-    )
-
-    mo.ui.altair_chart(_chart)
-    return
-
-
-@app.cell
-def _(
-    alt,
-    aussuper,
-    datetime,
-    direct_investment,
-    ending_balance,
-    hostplus,
     itertools,
     make_alldata,
     make_data,
     make_graph,
     mo,
     selected_options,
-    unisuper,
 ):
-    _initial_date = datetime.datetime(2017, 1, 1)
-    _data = []
-    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance.value, direction=1, initial_date=_initial_date)
+    _data = make_alldata(all_super_funds(), balance=ending_balance.value, direction=-1)
     _data.extend(itertools.chain.from_iterable(make_data(
         name,
-        ending_balance=ending_balance.value,
+        balance=ending_balance.value,
+        direction=-1,
+        **kwargs
+    ) for name, kwargs in direct_investment.items()))
+    _data = [x for x in _data if not selected_options.value or x['name'] in (y['value'] for y in selected_options.value)]
+
+    mo.ui.altair_chart(make_graph(
+        _data,
+        x=alt.X('date:T', scale=alt.Scale(reverse=True)),
+        y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
+        color='name:N',
+    ))
+    return
+
+
+@app.cell
+def _(all_super_funds, mo):
+    starting_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
+    _start = min(x['date'] for x in all_super_funds()).date()
+    _stop = max(x['date'] for x in all_super_funds()).date()
+    starting_date = mo.ui.date(start=_start, stop=_stop, label="Start Date")
+    mo.vstack([
+        starting_balance,
+        starting_date,
+    ])
+    return starting_balance, starting_date
+
+
+@app.cell
+def _(
+    all_super_funds,
+    datetime,
+    direct_investment,
+    itertools,
+    make_alldata,
+    make_data,
+    make_graph,
+    mo,
+    selected_options,
+    starting_balance,
+    starting_date,
+):
+    _initial_date = datetime.datetime(starting_date.value.year, starting_date.value.month, starting_date.value.day)
+    _data = []
+    _data = make_alldata(all_super_funds(), balance=starting_balance.value, direction=1, initial_date=_initial_date)
+    _data.extend(itertools.chain.from_iterable(make_data(
+        name,
+        balance=starting_balance.value,
         initial_date=_initial_date,
         direction=1,
         **kwargs
     ) for name, kwargs in direct_investment.items()))
     _data = [x for x in _data if not selected_options.value or x['name'] in (y['value'] for y in selected_options.value)]
 
-    _graph = make_graph(
+    mo.ui.altair_chart(make_graph(
         _data,
-        x=alt.X("date:T"),
-        y=alt.Y('balance:Q'),
-        group='name:N',
-    )
-    mo.ui.altair_chart(_graph)
+        x='date:T',
+        y='balance:Q',
+        color='name:N',
+    ))
     return
 
 
