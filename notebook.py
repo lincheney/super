@@ -281,11 +281,12 @@ def parse_unisuper(datetime, itertools, mo, unisuper_raw):
 
 
 @app.cell(hide_code=True)
-def parse_art(datetime, itertools, mo, art_raw):
+def parse_art(art_raw, datetime, itertools, mo):
     art = []
 
     for _name, _chart_iter in itertools.groupby(sorted(art_raw, key=lambda x: (x['name'], x['date'])), key=lambda x: x['name']):
-        _chart = list(_chart_iter)
+        _chart_iter = list(_chart_iter)
+        _chart = [x for x in _chart_iter if float(x['value'])]
         _previous = float(_chart[0]['value'])
         for _point in _chart:
             _value = float(_point['value'])

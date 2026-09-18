@@ -45,4 +45,7 @@ while read -r code; do
     data+="$(curl --compressed --fail "https://api.art.com.au/integration/publicweb/v1/investment/unit-price/investment-graph-data?unitPricesToPlot=all&investmentAmount=10000&fundCodes=$code&fromDate=$mindate&toDate=$maxdate" --compressed -H "x-art-subscription-key: $key" -H 'x-art-initiating-application: PublicWeb' -H "x-art-correlation-id: $(uuidgen)")"
 done <<<"$codes"
 
-<<<"$data" jq -re '["date", "name", "value"], (.funds[] | .name as $name | .unitPrices[] | [.date, $name, .sellPrice]) | @tsv' > public/art.tsv
+(
+    echo $'date\tname\tvalue'
+    <<<"$data" jq -re '.funds[] | .name as $name | .unitPrices[] | [.date, $name, .sellPrice] | @tsv'
+) > public/art.tsv

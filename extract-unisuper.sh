@@ -29,6 +29,6 @@ while read -r url; do
         until data="$(ff do dom.call '.tab.active figure' getAttribute data-chart '{"tabId": '$tab'}' | jq -re '.[0].result[0]')"; do
             sleep 1
         done
-        <<<"$data" jq -re '.data[0] | .InvestmentOptionTitle as $name | .Data[] | [.Name, $name, .Value] | @tsv' >>"public/unisuper.tsv"
+        <<<"$data" jq -re '.data[0] | .InvestmentOptionTitle as $name | .Data[] | [.Name, $name, .Value] | @tsv' >>public/unisuper.tsv
     )
 done <<<"$hrefs"
