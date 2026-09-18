@@ -11,7 +11,7 @@ else
     ff() { .ff "$@"; }
 fi
 
-tab="$(ff do browser.tabs.create '{}' | jq -re .id)"
+tab="$(ff do browser.tabs.create '{"active": false}' | jq -re .id)"
 trap 'ff do browser.tabs.remove "$tab"' EXIT
 
 ff do browser.tabs.update "$tab" '{"url": "https://www.unisuper.com.au/investments/our-investment-options"}'
@@ -21,12 +21,14 @@ done
 
 mkdir -p public/unisuper/
 while read -r url; do
-    echo "$url" >&2
-    name="$(basename "$url")"
-    ff do browser.tabs.update "$tab" '{"url": "'$url'"}' >/dev/null
-    sleep 2
-    until data="$(.ff do dom.call '.tab.active figure' getAttribute data-chart '{"tabId": '$tab'}' | jq -re '.[0].result[0]')"; do
-        sleep 1
-    done
-    printf %s "$data" | jq -re '["date", "value"], (.data[0].Data[] | [.Name, .Value]) | @tsv' >"public/unisuper/$name.tsv"
+    (
+        echo "$url" >&2
+        tab="$(ff do browser.tabs.create '{"url": "'$url'", "active": false}' | jq -re .id)"
+        trap 'ff do browser.tabs.remove "$tab"' EXIT
+        name="$(basename "$url")"
+        until data="$(.ff do dom.call '.tab.active figure' getAttribute data-chart '{"tabId": '$tab'}' | jq -re '.[0].result[0]')"; do
+            sleep 1
+        done
+        printf %s "$data" | jq -re '["date", "value"], (.data[0].Data[] | [.Name, .Value]) | @tsv' >"public/unisuper/$name.tsv"
+    )
 done <<<"$hrefs"

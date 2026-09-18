@@ -12,11 +12,9 @@ def _():
     import csv
     import datetime
     import itertools
-    import math
     import re
-    from functools import partial
 
-    return alt, csv, datetime, itertools, json, mo, partial, re
+    return alt, csv, datetime, itertools, json, mo, re
 
 
 @app.cell
@@ -27,6 +25,34 @@ def admin_fees():
         unisuper = dict(fixed = 0, asset = 2/100, asset_max = 96),
     )
     return (admin_fees,)
+
+
+@app.function
+def no_direct_investment(asset, state=None, purchase=0, numperiods=1):
+    if state is None:
+        return dict(num_shares=0, pooled=purchase, total=purchase)
+    state['pooled'] += purchase
+    state['total'] = state['pooled']
+    return state
+
+
+@app.function
+def memberdirect(asset, state=None, purchase=0, numperiods=1):
+    if state is None:
+        return dict(num_shares=(purchase-5000)/asset['value'], pooled=5000, total=purchase)
+    state['pooled'] -= 150 / numperiods
+    if state['pooled'] < 5000:
+        diff = min(purchase, 5000 - state['pooled'])
+        purchase -= diff
+        state['pooled'] += diff
+    if state['pooled'] < 5000:
+        # top up
+        state['num_shares'] -= (5000 - state['pooled']) / asset['value']
+        state['pooled'] = 5000
+    if purchase > 0:
+        state['num_shares'] += purchase / asset['value']
+    state['total'] = state['num_shares'] * asset['value'] + state['pooled']
+    return state
 
 
 @app.function
@@ -64,11 +90,11 @@ def parse_hostplus(datetime, hostplus_raw, itertools, mo):
 
         'fund': 'hostplus',
         'name': f'hostplus-{_x['name']}',
-        'value': 1+float(_x['return'])/100 if _x['return'] else None,
+        'value': 1+float(_x['return'])/100,
         'return': _x['return'],
         'date': datetime.datetime.strptime(_x['date'].split('T')[0], '%Y-%m-%d'),
 
-    } for _x in hostplus_raw]
+    } for _x in hostplus_raw if _x['return'] and float(_x['return'])]
 
     _data.sort(key=lambda x: x['name'])
     hostplus = []
@@ -113,7 +139,7 @@ def load_sharesight(json, mo):
 
 
 @app.cell
-def parse_sharesight(datetime, mo, sharesight_raw):
+def parse_sharesight(datetime, sharesight_raw):
     sharesight_prices = {}
     sharesight_payouts = {}
 
@@ -124,22 +150,11 @@ def parse_sharesight(datetime, mo, sharesight_raw):
                 (datetime.datetime.strptime(_date, '%d %b %y'), _point['y2'],)
                 for _date, _point in zip(_data['xAxis']['categories'], _data['series'])
             ]
-            _data = [(b[0], b[1], b[1]/a[1]) for a, b in zip(_data[:-1], _data[1:])]
+            _data = [{'date': b[0], 'value': b[1], 'return': b[1]/a[1]} for a, b in zip(_data[:-1], _data[1:])]
             sharesight_prices[_ticker] = _data
         elif _kind == 'payouts':
-            sharesight_payouts[_ticker] = _data
-
-    mo.ui.table([
-        {
-            'ticker': _ticker,
-            'date': _date,
-            'amount_per_share': _payout['company_event']['amount_per_share'],
-        }
-        for _ticker, _payouts in sharesight_payouts.items()
-        for _payout in _payouts
-        for _date in [_payout['paid_on']]
-    ])
-    return (sharesight_prices,)
+            sharesight_payouts[_ticker] = {datetime.datetime.strptime(_x['goes_ex_on'], '%Y-%m-%d'): _x for _x in _data}
+    return sharesight_payouts, sharesight_prices
 
 
 @app.cell
@@ -215,101 +230,107 @@ def parse_aussuper(
 
 
 @app.cell
-def _(admin_fees):
+def _(admin_fees, make_data):
     def make_alldata(*args, ending_balance):
         import itertools
-        import datetime
-
         alldata = sorted(itertools.chain.from_iterable(args), key=lambda x: (x['name'], -x['date'].timestamp()))
-
-        for _key, _group in itertools.groupby(alldata, key=lambda x: x['name']):
-            _group = [x for x in _group if x['value'] is not None]
-
-            _balance = ending_balance.value
-            for _k, _g in itertools.groupby(_group, key=lambda x: fy_of_date(x['date'])):
-                _g = list(_g)
-                _asset_fee_this_year = 0
-                for _x in _g:
-                    _admin_fees = admin_fees[_x['fund']]
-                    _asset_fee = min(_balance / len(_g) * _admin_fees['asset'], _admin_fees['asset_max'] - _asset_fee_this_year)
-                    _balance += _admin_fees['fixed'] / len(_g) + _asset_fee
-                    _asset_fee_this_year += _asset_fee
-                    _balance /= _x['value']
-                    _x['balance'] = _balance
-
-        alldata.extend({
-            'name': name,
-            'balance': ending_balance.value,
-            'date': datetime.datetime(2027, 7, 1),
-        } for name in set(x['name'] for x in alldata))
-        return alldata
+        data = []
+        for _, group in itertools.groupby(alldata, key=lambda x: x['name']):
+            group = [x for x in group if x['value'] is not None]
+            data.extend(make_data(group[0]['name'], group, admin_fees[group[0]['fund']], None, no_direct_investment, ending_balance=ending_balance))
+        return data
 
     return (make_alldata,)
 
 
 @app.cell
-def _(admin_fees, aussuper, sharesight_prices):
-    def make_memberdirect(code, *, ending_balance):
+def _(sharesight_payouts, sharesight_prices):
+    def make_data(name, pooled_returns, admin_fees, asset_code, direct_investment_func, *, ending_balance):
         import datetime
         import itertools
 
-        etf = sorted(sharesight_prices[code], reverse=True)
-        _aussuper_returns = sorted(
-            (_x['date'], _x['value'])
-            for _x in aussuper
-            if _x['name'] == 'aussuper-International Shares' and _x['value'] is not None
-        )
-        _aussuper_returns = [(*x, p) for x, p in zip(_aussuper_returns, cumproduct(_x[1] for _x in _aussuper_returns))]
+        pooled_returns = sorted(pooled_returns, key=lambda x: x['date'])
+        pooled_returns = [{**x, 'cumulative': p} for x, p in zip(pooled_returns, cumproduct(x['value'] for x in pooled_returns))]
+        asset = sharesight_prices[asset_code] if asset_code else pooled_returns
+        asset = sorted(asset, reverse=True, key=lambda x: x['date'])
 
         def interpolate(date):
-            prev = max(i for i in _aussuper_returns if i[0] <= date)
-            next = min((i for i in _aussuper_returns if i[0] >= date), default=None)
-            next = next or _aussuper_returns[-1]
-            if prev[0] == next[0]:
-                fraction = 1
+            prev = max((x for x in pooled_returns if x['date'] <= date), key=lambda x: x['date'])
+            next = min((x for x in pooled_returns if x['date'] >= date), key=lambda x: x['date'], default=None)
+            next = next or pooled_returns[-1]
+            if prev['date'] == next['date']:
+                return next['cumulative']
             else:
-                fraction = (date - next[0]) / (next[0] - prev[0])
-            return prev[2] * ((next[2] / prev[2]) ** fraction)
+                fraction = (date - next['date']) / (next['date'] - prev['date'])
+                return prev['cumulative'] * (next['value'] ** fraction)
 
-        shares = ending_balance.value - 5000
-        pooled = 5000
+        # init
+        state = direct_investment_func(asset[0], None, purchase=ending_balance)
+
+        deferred_income = 0
+        cost_base = 0
         data = []
         prev_date = datetime.datetime(2027, 7, 1)
-        for _k, _g in itertools.groupby(etf, key=lambda x: fy_of_date(x[0])):
-            _g = list(_g)
-            _asset_fee_this_year = 0
-            for _x in _g:
-                _admin_fees = admin_fees['aussuper']
-                _asset_fee = min((shares + pooled) / len(_g) * _admin_fees['asset'], _admin_fees['asset_max'] - _asset_fee_this_year)
-                pooled += _admin_fees['fixed'] / len(_g) + _asset_fee
-                _asset_fee_this_year += _asset_fee
-                shares /= _x[2]
+        data.append({
+            'fund': name.partition('-')[0],
+            'name': name,
+            'balance': state['total'],
+            'date': prev_date,
+            'deferred_income': deferred_income,
+        })
+        for _, group in itertools.groupby(asset, key=lambda x: fy_of_date(x['date'])):
+            group = list(group)
+            asset_fee_this_year = 0
+            for x in group:
+                asset_fee = min(state['total'] / len(group) * admin_fees['asset'], admin_fees['asset_max'] - asset_fee_this_year)
+                state['pooled'] += admin_fees['fixed'] / len(group) + asset_fee + 150 / len(group)
+                asset_fee_this_year += asset_fee
 
-                pooled *= interpolate(_x[0]) / interpolate(prev_date)
-                prev_date = _x[0]
+                state['pooled'] *= interpolate(x['date']) / interpolate(prev_date)
+                prev_date = x['date']
+
+                if asset_code and (payout := sharesight_payouts[asset_code].get(x['date'])):
+                    au_local_dividend = payout['au_local_dividend']
+                    deferred_income += au_local_dividend['deferred_income'] * state['num_shares'] / 1_000_000
+
+                    cash = au_local_dividend['amount']
+                    taxable = sum(au_local_dividend[k] for k in ['foreign_source_income', 'unfranked_amount', 'interest_payment_amount', 'franked_amount', 'non_discounted_capital_gains'])
+                    discounted_taxable = au_local_dividend['discounted_capital_gains']
+                    tax_credit = sum(au_local_dividend[k] for k in ['non_resident_withholding_tax', 'tax_credit'])
+                    if tax_credit <= taxable:
+                        taxable -= tax_credit
+                        cash -= taxable * 0.15 + discounted_taxable * 0.1
+                    elif tax_credit < taxable + discounted_taxable:
+                        discounted_taxable -= tax_credit - taxable
+                        cash -= discounted_taxable * 0.1
+                    assert cash >= 0, cash
+
+                    # drp
+                    # initial + cash * initial / price == num_shares
+                    # initial == num_shares / (1 + cash / price)
+                    state['num_shares'] /= (1 + cash / 1_000_000 / x['value'])
+
+                state = direct_investment_func(x, state, numperiods=len(group))
 
                 data.append({
-                    'fund': 'aussuper',
-                    'name': f'aussuper-memberdirect-{code}',
-                    'date': _x[0],
-                    'balance': shares + pooled,
+                    'fund': name.partition('-')[0],
+                    'name': name,
+                    'date': x['date'],
+                    'balance': state['total'],
+                    'deferred_income': deferred_income,
                 })
-        data.append({
-            'fund': 'aussuper',
-            'name': f'aussuper-memberdirect-{code}',
-            'balance': ending_balance.value,
-            'date': datetime.datetime(2027, 7, 1),
-        })
 
         return data
 
-    return (make_memberdirect,)
+    return (make_data,)
 
 
 @app.cell
-def _(make_memberdirect, partial):
+def _(admin_fees, aussuper):
+    _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
     direct_investment = {
-        'aussuper-memberdirect-VGS': partial(make_memberdirect, 'VGS'),
+        'aussuper-memberdirect-VGS': dict(asset_code='VGS', direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled),
+        'aussuper-memberdirect-VAS': dict(asset_code='VAS', direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled),
     }
     return (direct_investment,)
 
@@ -332,12 +353,18 @@ def cumproduct_graph(
     hostplus,
     itertools,
     make_alldata,
+    make_data,
     mo,
     multiselect,
     unisuper,
 ):
-    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance)
-    _data.extend(itertools.chain.from_iterable(f(ending_balance=ending_balance) for f in direct_investment.values()))
+    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance.value)
+    _data.extend(itertools.chain.from_iterable(make_data(
+        name,
+        ending_balance=ending_balance.value,
+        **kwargs
+    ) for name, kwargs in direct_investment.items()))
+
     _data = [x for x in _data if not multiselect.value or x['name'] in multiselect.value]
     chart = (
         alt.Chart(alt.InlineData(_data))
