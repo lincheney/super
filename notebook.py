@@ -285,10 +285,13 @@ def parse_art(art_raw, datetime, itertools, mo):
     art = []
 
     for _name, _chart_iter in itertools.groupby(sorted(art_raw, key=lambda x: (x['name'], x['date'])), key=lambda x: x['name']):
-        _chart_iter = list(_chart_iter)
         _chart = [x for x in _chart_iter if float(x['value'])]
+
+        # daily is too fine grained and causes too much data, turn it down
         _previous = float(_chart[0]['value'])
-        for _point in _chart:
+        for _month, _group in itertools.groupby(_chart, key=lambda x: x['date'].rpartition('-')[0]):
+            _group = list(_group)
+            _point = _group[-1]
             _value = float(_point['value'])
             art.append({
                 'fund': 'art',
