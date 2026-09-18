@@ -498,7 +498,7 @@ def _(art, aussuper, direct_investment, hostplus, mo, unisuper):
     ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
     _names = list(set(x['name'] for x in art + aussuper + hostplus + unisuper)) + list(direct_investment.keys())
     _names.sort()
-    selected_options = mo.ui.table([{'value': v} for v in _names], page_size=25)
+    selected_options = mo.ui.multiselect(options=_names, label='Filter')
     mo.vstack([
         selected_options,
         ending_balance,
@@ -526,7 +526,7 @@ def cumproduct_graph(
         direction=-1,
         **kwargs
     ) for name, kwargs in direct_investment.items()))
-    _data = [x for x in _data if not selected_options.value or x['name'] in (y['value'] for y in selected_options.value)]
+    _data = [x for x in _data if not selected_options.value or x['name'] in selected_options.value]
 
     mo.ui.altair_chart(make_graph(
         _data,
@@ -539,7 +539,7 @@ def cumproduct_graph(
 
 @app.cell(hide_code=True)
 def _(all_super_funds, mo):
-    starting_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
+    starting_balance = mo.ui.number(start=1, value=1_000_000, label="Starting balance")
     _start = min(x['date'] for x in all_super_funds()).date()
     _stop = max(x['date'] for x in all_super_funds()).date()
     starting_date = mo.ui.date(start=_start, stop=_stop, value='2017-01-01', label="Start Date")
@@ -574,7 +574,7 @@ def _(
         direction=1,
         **kwargs
     ) for name, kwargs in direct_investment.items()))
-    _data = [x for x in _data if not selected_options.value or x['name'] in (y['value'] for y in selected_options.value)]
+    _data = [x for x in _data if not selected_options.value or x['name'] in selected_options.value]
 
     mo.ui.altair_chart(make_graph(
         _data,
