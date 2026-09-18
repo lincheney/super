@@ -40,45 +40,58 @@ def no_direct_investment(asset, state=None, purchase=0, numperiods=1):
 def memberdirect(asset, state=None, purchase=0, numperiods=1):
     if state is None:
         return dict(num_shares=(purchase-5000)/asset['value'], pooled=5000, total=purchase)
-    state['pooled'] -= 150 / numperiods
+
+    def brokerage(amount):
+        return 10 + 0.08/100 * min(max(0, amount - 12_500), 50_000) + 0.04/100 * max(0, amount - 50_000)
+
+    state['pooled'] += 150 / numperiods
+    # undo a purchase
+    state['num_shares'] -= purchase / asset['value']
+    state['pooled'] += brokerage(purchase)
+    # too low, undo a buy
     if state['pooled'] < 5000:
-        diff = min(purchase, 5000 - state['pooled'])
-        purchase -= diff
-        state['pooled'] += diff
-    if state['pooled'] < 5000:
-        # top up
-        state['num_shares'] -= (5000 - state['pooled']) / asset['value']
-        state['pooled'] = 5000
-    if purchase > 0:
-        state['num_shares'] += purchase / asset['value']
+        diff = 5000 - state['pooled']
+        state['num_shares'] -= diff / asset['value']
+        state['pooled'] += diff + brokerage(diff) - brokerage(purchase)
+
     state['total'] = state['num_shares'] * asset['value'] + state['pooled']
     return state
 
 
-@app.function
-def choiceplus(asset, state=None, purchase=0, numperiods=1):
-    if state is None:
-        pooled = max(purchase * 0.2, 2000)
-        return dict(num_shares=(purchase-pooled-200)/asset['value'], pooled=pooled, transaction=200, total=purchase)
+@app.cell
+def _(hostplus):
+    def choiceplus(asset, state=None, purchase=0, numperiods=1):
+        if state is None:
+            pooled = max(purchase * 0.2, 2000)
+            return dict(num_shares=(purchase-pooled-200)/asset['value'], pooled=pooled, transaction=200, total=purchase)
 
-    def total():
-        return state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
+        def total():
+            return state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
+        def brokerage(amount):
+            return 13 + 0.1/100 * max(0, amount - 13_000)
 
-    state['pooled'] -= 168 / numperiods
+        # interest on transaction account, use the rate from the cash option
+        interest = min((x for x in hostplus if x['name'] == 'hostplus-Cash'), key=lambda x: abs(x['date'] - asset['date']))
+        interest = interest['value'] ** (12 / numperiods)
+        state['transaction'] += state['transaction'] * ((interest - 1) * 0.85 - 0.1/100/numperiods)
+        # as long as yearly interest > 0.1% this should be fine
 
-    required_pooled = max(total() * 0.2, 2000)
-    if state['pooled'] < required_pooled:
-        diff = min(purchase, required_pooled - state['pooled'])
-        purchase -= diff
-        state['pooled'] += diff
-    if state['pooled'] < required_pooled:
-        # top up
-        state['num_shares'] -= (required_pooled - state['pooled']) / asset['value']
-        state['pooled'] = required_pooled
-    if purchase > 0:
-        state['num_shares'] += purchase / asset['value']
-    state['total'] = total()
-    return state
+        state['pooled'] += 168 / numperiods
+        required_pooled = max(total() * 0.2, 2000)
+
+        # undo a purchase
+        state['num_shares'] -= purchase / asset['value']
+        state['pooled'] += brokerage(purchase)
+        # too low, undo a buy
+        if state['pooled'] < required_pooled:
+            diff = required_pooled - state['pooled']
+            state['num_shares'] -= diff / asset['value']
+            state['pooled'] += diff + brokerage(diff) - brokerage(purchase)
+
+        state['total'] = total()
+        return state
+
+    return (choiceplus,)
 
 
 @app.function
@@ -180,6 +193,11 @@ def parse_sharesight(datetime, sharesight_raw):
             sharesight_prices[_ticker] = _data
         elif _kind == 'payouts':
             sharesight_payouts[_ticker] = {datetime.datetime.strptime(_x['goes_ex_on'], '%Y-%m-%d'): _x for _x in _data}
+
+    # undo the stock split
+    for _row in sharesight_prices['IVV']:
+        if _row['date'] >= datetime.datetime(2022, 12, 9):
+            _row['value'] *= 15
     return sharesight_payouts, sharesight_prices
 
 
@@ -356,25 +374,32 @@ def _(sharesight_payouts, sharesight_prices):
 
 
 @app.cell
-def _(admin_fees, aussuper, hostplus):
+def _(admin_fees, aussuper, choiceplus, hostplus):
     _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
     _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares - Indexed']
+    _memberdirect = dict(direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled)
+    _choiceplus = dict(direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled)
     direct_investment = {
-        'aussuper-memberdirect-VGS': dict(asset_code='VGS', direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled),
-        'aussuper-memberdirect-VAS': dict(asset_code='VAS', direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled),
-        'hostplus-choiceplus-VGS': dict(asset_code='VGS', direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled),
-        'hostplus-choiceplus-VAS': dict(asset_code='VAS', direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled),
+        'aussuper-memberdirect-VGS': dict(asset_code='VGS', **_memberdirect),
+        'aussuper-memberdirect-VAS': dict(asset_code='VAS', **_memberdirect),
+        'aussuper-memberdirect-IVV': dict(asset_code='IVV', **_memberdirect),
+        'hostplus-choiceplus-VGS': dict(asset_code='VGS', **_choiceplus),
+        'hostplus-choiceplus-VAS': dict(asset_code='VAS', **_choiceplus),
+        'hostplus-choiceplus-IVV': dict(asset_code='IVV', **_choiceplus),
     }
     return (direct_investment,)
 
 
 @app.cell
-def filter_cumproduct(aussuper, direct_investment, hostplus, mo, unisuper):
-    ending_balance = mo.ui.number(start=1, value=100_000, label="Ending balance")
-    _options = sorted(set(x['name'] for x in hostplus + aussuper + unisuper) | (direct_investment.keys()))
-    multiselect = mo.ui.multiselect(options=_options, label='Filter')
-    mo.vstack([ending_balance, multiselect])
-    return ending_balance, multiselect
+def _(aussuper, direct_investment, hostplus, mo, unisuper):
+    ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
+    _names = list(set(x['name'] for x in aussuper + hostplus + unisuper)) + list(direct_investment.keys())
+    selected_options = mo.ui.table(sorted(_names))
+    mo.vstack([
+        selected_options,
+        ending_balance,
+    ])
+    return ending_balance, selected_options
 
 
 @app.cell(hide_code=True)
@@ -388,28 +413,30 @@ def cumproduct_graph(
     make_alldata,
     make_data,
     mo,
-    multiselect,
+    selected_options,
     unisuper,
 ):
+
     _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance.value)
     _data.extend(itertools.chain.from_iterable(make_data(
         name,
         ending_balance=ending_balance.value,
         **kwargs
     ) for name, kwargs in direct_investment.items()))
+    _data = [x for x in _data if not selected_options.value or x['name'] in selected_options.value]
 
-    _data = [x for x in _data if not multiselect.value or x['name'] in multiselect.value]
     chart = (
         alt.Chart(alt.InlineData(_data))
-        .mark_line()
+        .mark_line(point=alt.OverlayMarkDef(size=5, filled=True))
         .encode(
             x=alt.X("date:T", scale=alt.Scale(reverse=True)),
             y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
             color='name:N',
         )
-        .properties(width="container")
+        .properties(width="container", height=500)
         .interactive()
     )
+
     mo.ui.altair_chart(chart)
     return
 
