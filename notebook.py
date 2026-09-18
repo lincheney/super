@@ -375,6 +375,7 @@ def cumproduct_graph(
             color='name:N',
         )
         .properties(width="container")
+        .interactive()
     )
     mo.ui.altair_chart(chart)
     return
