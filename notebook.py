@@ -30,14 +30,15 @@ def admin_fees():
         hostplus = dict(fixed = 78, asset = 0, asset_max = 0),
         aussuper = dict(fixed = 52, asset = 0.12/100, asset_max = 600),
         unisuper = dict(fixed = 0, asset = 2/100, asset_max = 96),
+        art = dict(fixed = 0, asset = 0, asset_max = 0),
     )
     return (admin_fees,)
 
 
 @app.cell(hide_code=True)
-def _(aussuper, hostplus, itertools, unisuper):
+def _(art, aussuper, hostplus, itertools, unisuper):
     def all_super_funds():
-        return itertools.chain(aussuper, hostplus, unisuper)
+        return itertools.chain(art, aussuper, hostplus, unisuper)
 
     return (all_super_funds,)
 
@@ -213,6 +214,13 @@ def load_sharesight(json, mo):
 
 
 @app.cell(hide_code=True)
+def load_art(csv, mo):
+    _file = mo.notebook_location()/'public'/'art.tsv'
+    art_raw = list(csv.DictReader(read_file(_file).decode().splitlines(), delimiter='\t'))
+    return (art_raw,)
+
+
+@app.cell(hide_code=True)
 def parse_sharesight(datetime, sharesight_raw):
     sharesight_prices = {}
     sharesight_payouts = {}
@@ -259,6 +267,27 @@ def parse_unisuper(datetime, itertools, mo, unisuper_raw):
 
     mo.ui.table(unisuper)
     return (unisuper,)
+
+
+@app.cell(hide_code=True)
+def parse_art(datetime, itertools, mo, art_raw):
+    art = []
+
+    for _name, _chart_iter in itertools.groupby(sorted(art_raw, key=lambda x: (x['name'], x['date'])), key=lambda x: x['name']):
+        _chart = list(_chart_iter)
+        _previous = float(_chart[0]['value'])
+        for _point in _chart:
+            _value = float(_point['value'])
+            art.append({
+                'fund': 'art',
+                'name': f'art-{_name}',
+                'value': _value / _previous,
+                'date': datetime.datetime.strptime(_point['date'].split('T')[0], '%Y-%m-%d'),
+            })
+            _previous = _value
+
+    mo.ui.table(art)
+    return (art,)
 
 
 @app.cell(hide_code=True)
@@ -446,9 +475,9 @@ def _(admin_fees, aussuper, choiceplus, hostplus):
 
 
 @app.cell(hide_code=True)
-def _(aussuper, direct_investment, hostplus, mo, unisuper):
+def _(art, aussuper, direct_investment, hostplus, mo, unisuper):
     ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
-    _names = list(set(x['name'] for x in aussuper + hostplus + unisuper)) + list(direct_investment.keys())
+    _names = list(set(x['name'] for x in art + aussuper + hostplus + unisuper)) + list(direct_investment.keys())
     _names.sort()
     selected_options = mo.ui.table([{'value': v} for v in _names], page_size=25)
     mo.vstack([
