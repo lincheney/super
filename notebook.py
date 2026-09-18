@@ -19,6 +19,7 @@ def _():
     import csv
     import datetime
     import itertools
+    import math
     import re
 
     return alt, csv, datetime, itertools, json, mo, re
@@ -60,18 +61,21 @@ def _(alt, mo):
 
 @app.function(hide_code=True)
 def calc_brokerage(amount, brokerage):
-    if brokerage(0) > abs(amount):
+    if amount >= 0 and brokerage(0) > amount:
         return 0, amount
 
-    low = 0
-    high = abs(amount)
-    for _ in range(100):
-        value = (low + high) / 2
-        if value + brokerage(value) < abs(amount):
-            low = value
+    low = min(amount, 0)
+    high = max(amount, 0)
+    while True:
+        mid = (low + high) / 2
+        diff = mid + brokerage(mid) - amount
+        if abs(diff) < 0.01 or high - low < 0.01:
+            break
+        elif diff < 0:
+            low = mid
         else:
-            high = value
-    return amount - brokerage((low + high) / 2), 0
+            high = mid
+    return mid, 0
 
 
 @app.function(hide_code=True)
@@ -98,7 +102,7 @@ def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
         share_diff -= 5000 - state['pooled']
         state['pooled'] = 5000
     if share_diff:
-        share_diff, leftover = calc_brokerage(abs(share_diff), brokerage)
+        share_diff, leftover = calc_brokerage(share_diff, brokerage)
         state['num_shares'] += share_diff / asset['value'] * direction
         state['pooled'] += leftover * direction
 
@@ -134,7 +138,7 @@ def _(hostplus):
             share_diff -= required_pooled - state['pooled']
             state['pooled'] = required_pooled
         if share_diff:
-            share_diff, leftover = calc_brokerage(abs(share_diff), brokerage)
+            share_diff, leftover = calc_brokerage(share_diff, brokerage)
             state['num_shares'] += share_diff / asset['value'] * direction
             state['pooled'] += leftover * direction
 
@@ -475,7 +479,7 @@ def _(datetime, sharesight_payouts, sharesight_prices):
 @app.cell(hide_code=True)
 def _(admin_fees, aussuper, choiceplus, hostplus):
     _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
-    _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares - Indexed']
+    _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares']
     _memberdirect = dict(direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled)
     _choiceplus = dict(direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled)
     direct_investment = {
@@ -538,7 +542,7 @@ def _(all_super_funds, mo):
     starting_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
     _start = min(x['date'] for x in all_super_funds()).date()
     _stop = max(x['date'] for x in all_super_funds()).date()
-    starting_date = mo.ui.date(start=_start, stop=_stop, label="Start Date")
+    starting_date = mo.ui.date(start=_start, stop=_stop, value='2017-01-01', label="Start Date")
     mo.vstack([
         starting_balance,
         starting_date,
