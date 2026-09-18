@@ -56,6 +56,32 @@ def memberdirect(asset, state=None, purchase=0, numperiods=1):
 
 
 @app.function
+def choiceplus(asset, state=None, purchase=0, numperiods=1):
+    if state is None:
+        pooled = max(purchase * 0.2, 2000)
+        return dict(num_shares=(purchase-pooled-200)/asset['value'], pooled=pooled, transaction=200, total=purchase)
+
+    def total():
+        return state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
+
+    state['pooled'] -= 168 / numperiods
+
+    required_pooled = max(total() * 0.2, 2000)
+    if state['pooled'] < required_pooled:
+        diff = min(purchase, required_pooled - state['pooled'])
+        purchase -= diff
+        state['pooled'] += diff
+    if state['pooled'] < required_pooled:
+        # top up
+        state['num_shares'] -= (required_pooled - state['pooled']) / asset['value']
+        state['pooled'] = required_pooled
+    if purchase > 0:
+        state['num_shares'] += purchase / asset['value']
+    state['total'] = total()
+    return state
+
+
+@app.function
 def read_file(path):
     if '://' in str(path):
         import urllib.request
@@ -253,6 +279,7 @@ def _(sharesight_payouts, sharesight_prices):
         pooled_returns = [{**x, 'cumulative': p} for x, p in zip(pooled_returns, cumproduct(x['value'] for x in pooled_returns))]
         asset = sharesight_prices[asset_code] if asset_code else pooled_returns
         asset = sorted(asset, reverse=True, key=lambda x: x['date'])
+        mindate = min(x['date'] for x in pooled_returns)
 
         def interpolate(date):
             prev = max((x for x in pooled_returns if x['date'] <= date), key=lambda x: x['date'])
@@ -282,6 +309,9 @@ def _(sharesight_payouts, sharesight_prices):
             group = list(group)
             asset_fee_this_year = 0
             for x in group:
+                if x['date'] < mindate:
+                    continue
+
                 asset_fee = min(state['total'] / len(group) * admin_fees['asset'], admin_fees['asset_max'] - asset_fee_this_year)
                 state['pooled'] += admin_fees['fixed'] / len(group) + asset_fee + 150 / len(group)
                 asset_fee_this_year += asset_fee
@@ -326,11 +356,14 @@ def _(sharesight_payouts, sharesight_prices):
 
 
 @app.cell
-def _(admin_fees, aussuper):
+def _(admin_fees, aussuper, hostplus):
     _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
+    _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares - Indexed']
     direct_investment = {
         'aussuper-memberdirect-VGS': dict(asset_code='VGS', direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled),
         'aussuper-memberdirect-VAS': dict(asset_code='VAS', direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled),
+        'hostplus-choiceplus-VGS': dict(asset_code='VGS', direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled),
+        'hostplus-choiceplus-VAS': dict(asset_code='VAS', direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled),
     }
     return (direct_investment,)
 
