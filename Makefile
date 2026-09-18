@@ -29,3 +29,7 @@ public/sharesight/:
 	bash extract-sharesight.sh
 public/sharesight.txt: public/sharesight/
 	ls public/sharesight/ -1 | sort > $@
+
+art: public/art.json ;
+public/art.json:
+	bash -x extract-art.sh
