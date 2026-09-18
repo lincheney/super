@@ -59,6 +59,22 @@ def _(alt, mo):
 
 
 @app.function(hide_code=True)
+def calc_brokerage(amount, brokerage):
+    if brokerage(0) > abs(amount):
+        return 0, amount
+
+    low = 0
+    high = abs(amount)
+    for _ in range(100):
+        value = (low + high) / 2
+        if value + brokerage(value) < abs(amount):
+            low = value
+        else:
+            high = value
+    return amount - brokerage((low + high) / 2), 0
+
+
+@app.function(hide_code=True)
 def no_direct_investment(asset, state=None, purchase=0, numperiods=1, *, direction):
     if state is None:
         return dict(num_shares=0, pooled=purchase, total=purchase)
@@ -79,13 +95,12 @@ def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
 
     share_diff = purchase * direction
     if state['pooled'] < 5000:
-        diff = 5000 - state['pooled']
-        diff = brokerage(abs(share_diff - diff)) * direction
-        state['pooled'] += diff
-        share_diff -= diff
+        share_diff -= 5000 - state['pooled']
+        state['pooled'] = 5000
     if share_diff:
-        state['num_shares'] += share_diff / asset['value']
-        state['pooled'] -= brokerage(abs(share_diff)) * direction
+        share_diff, leftover = calc_brokerage(abs(share_diff), brokerage)
+        state['num_shares'] += share_diff / asset['value'] * direction
+        state['pooled'] += leftover * direction
 
     state['total'] = state['num_shares'] * asset['value'] + state['pooled']
     return state
@@ -116,13 +131,12 @@ def _(hostplus):
 
         share_diff = purchase * direction
         if state['pooled'] < required_pooled:
-            diff = required_pooled - state['pooled']
-            diff = brokerage(abs(share_diff - diff)) * direction
-            state['pooled'] += diff
-            share_diff -= diff
+            share_diff -= required_pooled - state['pooled']
+            state['pooled'] = required_pooled
         if share_diff:
-            state['num_shares'] += share_diff / asset['value']
-            state['pooled'] -= brokerage(abs(share_diff)) * direction
+            share_diff, leftover = calc_brokerage(abs(share_diff), brokerage)
+            state['num_shares'] += share_diff / asset['value'] * direction
+            state['pooled'] += leftover * direction
 
         state['total'] = total()
         return state
