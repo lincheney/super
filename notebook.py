@@ -27,32 +27,68 @@ def admin_fees():
     return (admin_fees,)
 
 
+@app.cell
+def _(alt):
+    def make_graph(data, *, height=500, x, y, group, **kwargs):
+        data = alt.InlineData(data)
+
+        nearest = alt.selection_point(fields=[y.shorthand.split(':')[0]], nearest=True, on="pointerover", empty=False)
+        chart = (
+            alt.Chart(data)
+            .mark_line()
+            .encode(x=x, y=y, color=group)
+            .properties(width="container", height=height)
+        )
+
+        selectors = alt.Chart(data).mark_point().encode(x=x, y=y, opacity=alt.value(0)).add_params(nearest)
+
+        text = chart.mark_text(align="center", fontWeight='bold', dy=-50).encode(
+            text=alt.when(nearest).then(group).otherwise(alt.value(" ")),
+        )
+        text_bg = text.mark_text(
+            align='center',
+            baseline='middle',
+            fontWeight='bold',
+            stroke='white',
+            strokeWidth=10,
+            strokeJoin='round',
+            opacity=0.8,
+            dy=-50,
+        )
+
+        return alt.layer(chart, selectors, text_bg, text).interactive()
+
+    return (make_graph,)
+
+
 @app.function
-def no_direct_investment(asset, state=None, purchase=0, numperiods=1):
+def no_direct_investment(asset, state=None, purchase=0, numperiods=1, *, direction):
     if state is None:
         return dict(num_shares=0, pooled=purchase, total=purchase)
-    state['pooled'] += purchase
+    state['pooled'] += purchase * direction
     state['total'] = state['pooled']
     return state
 
 
 @app.function
-def memberdirect(asset, state=None, purchase=0, numperiods=1):
+def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
     if state is None:
         return dict(num_shares=(purchase-5000)/asset['value'], pooled=5000, total=purchase)
 
     def brokerage(amount):
         return 10 + 0.08/100 * min(max(0, amount - 12_500), 50_000) + 0.04/100 * max(0, amount - 50_000)
 
-    state['pooled'] += 150 / numperiods
-    # undo a purchase
-    state['num_shares'] -= purchase / asset['value']
-    state['pooled'] += brokerage(purchase)
-    # too low, undo a buy
+    state['pooled'] -= 150 / numperiods * direction
+
+    share_diff = purchase * direction
     if state['pooled'] < 5000:
         diff = 5000 - state['pooled']
-        state['num_shares'] -= diff / asset['value']
-        state['pooled'] += diff + brokerage(diff) - brokerage(purchase)
+        diff = brokerage(abs(share_diff - diff)) * direction
+        state['pooled'] += diff
+        share_diff -= diff
+    if share_diff:
+        state['num_shares'] += share_diff / asset['value']
+        state['pooled'] -= brokerage(abs(share_diff)) * direction
 
     state['total'] = state['num_shares'] * asset['value'] + state['pooled']
     return state
@@ -60,7 +96,7 @@ def memberdirect(asset, state=None, purchase=0, numperiods=1):
 
 @app.cell
 def _(hostplus):
-    def choiceplus(asset, state=None, purchase=0, numperiods=1):
+    def choiceplus(asset, state=None, purchase=0, numperiods=1, *, direction):
         if state is None:
             pooled = max(purchase * 0.2, 2000)
             return dict(num_shares=(purchase-pooled-200)/asset['value'], pooled=pooled, transaction=200, total=purchase)
@@ -73,20 +109,23 @@ def _(hostplus):
         # interest on transaction account, use the rate from the cash option
         interest = min((x for x in hostplus if x['name'] == 'hostplus-Cash'), key=lambda x: abs(x['date'] - asset['date']))
         interest = interest['value'] ** (12 / numperiods)
-        state['transaction'] += state['transaction'] * ((interest - 1) * 0.85 - 0.1/100/numperiods)
-        # as long as yearly interest > 0.1% this should be fine
+        state['transaction'] += state['transaction'] * ((interest - 1) * 0.85 - 0.1/100/numperiods) * direction
+        if state['transaction'] < 200:
+            state['pooled'] -= 200 - state['transaction']
+            state['transaction'] = 200
 
-        state['pooled'] += 168 / numperiods
+        state['pooled'] -= 168 / numperiods * direction
         required_pooled = max(total() * 0.2, 2000)
 
-        # undo a purchase
-        state['num_shares'] -= purchase / asset['value']
-        state['pooled'] += brokerage(purchase)
-        # too low, undo a buy
+        share_diff = purchase * direction
         if state['pooled'] < required_pooled:
             diff = required_pooled - state['pooled']
-            state['num_shares'] -= diff / asset['value']
-            state['pooled'] += diff + brokerage(diff) - brokerage(purchase)
+            diff = brokerage(abs(share_diff - diff)) * direction
+            state['pooled'] += diff
+            share_diff -= diff
+        if share_diff:
+            state['num_shares'] += share_diff / asset['value']
+            state['pooled'] -= brokerage(abs(share_diff)) * direction
 
         state['total'] = total()
         return state
@@ -239,7 +278,6 @@ def parse_aussuper(
 
     _daily_names = aussuper_daily_raw[0].keys() - {'Rate Date'}
     _min_daily_fy = {name: fy_of_date(datetime.datetime.strptime(min(x['Rate Date'] for x in aussuper_daily_raw if x[name]), '%Y-%m-%d') - datetime.timedelta(days=1)) + 1 for name in _daily_names}
-    print(_min_daily_fy)
 
     for _row in aussuper_annual_raw:
         _year = _row['Financial Year']
@@ -275,28 +313,45 @@ def parse_aussuper(
 
 @app.cell
 def _(admin_fees, make_data):
-    def make_alldata(*args, ending_balance):
+    def make_alldata(*args, direction, **kwargs):
         import itertools
-        alldata = sorted(itertools.chain.from_iterable(args), key=lambda x: (x['name'], -x['date'].timestamp()))
+        alldata = sorted(itertools.chain.from_iterable(args), key=lambda x: (x['name'], x['date'].timestamp() * direction))
         data = []
         for _, group in itertools.groupby(alldata, key=lambda x: x['name']):
             group = [x for x in group if x['value'] is not None]
-            data.extend(make_data(group[0]['name'], group, admin_fees[group[0]['fund']], None, no_direct_investment, ending_balance=ending_balance))
+            data.extend(make_data(
+                group[0]['name'],
+                group,
+                admin_fees[group[0]['fund']],
+                None,
+                no_direct_investment,
+                direction=direction,
+                **kwargs,
+            ))
         return data
 
     return (make_alldata,)
 
 
 @app.cell
-def _(sharesight_payouts, sharesight_prices):
-    def make_data(name, pooled_returns, admin_fees, asset_code, direct_investment_func, *, ending_balance):
-        import datetime
+def _(datetime, sharesight_payouts, sharesight_prices):
+    def make_data(
+        name,
+        pooled_returns,
+        admin_fees,
+        asset_code,
+        direct_investment_func,
+        *,
+        direction,
+        ending_balance,
+        initial_date=datetime.datetime(2027, 7, 1),
+    ):
         import itertools
 
         pooled_returns = sorted(pooled_returns, key=lambda x: x['date'])
         pooled_returns = [{**x, 'cumulative': p} for x, p in zip(pooled_returns, cumproduct(x['value'] for x in pooled_returns))]
         asset = sharesight_prices[asset_code] if asset_code else pooled_returns
-        asset = sorted(asset, reverse=True, key=lambda x: x['date'])
+        asset = sorted(asset, reverse=direction==-1, key=lambda x: x['date'])
         mindate = min(x['date'] for x in pooled_returns)
 
         def interpolate(date):
@@ -309,13 +364,20 @@ def _(sharesight_payouts, sharesight_prices):
                 fraction = (date - next['date']) / (next['date'] - prev['date'])
                 return prev['cumulative'] * (next['value'] ** fraction)
 
-        # init
-        state = direct_investment_func(asset[0], None, purchase=ending_balance)
-
         deferred_income = 0
         cost_base = 0
         data = []
-        prev_date = datetime.datetime(2027, 7, 1)
+
+        prev_date = initial_date
+        if direction == 1:
+            mindate = prev_date = max(prev_date, mindate)
+
+        # init
+        asset = [a for a in asset if a['date'] >= mindate]
+        if not asset:
+            return ()
+        state = direct_investment_func(asset[0], None, purchase=ending_balance, direction=direction)
+
         data.append({
             'fund': name.partition('-')[0],
             'name': name,
@@ -327,14 +389,11 @@ def _(sharesight_payouts, sharesight_prices):
             group = list(group)
             asset_fee_this_year = 0
             for x in group:
-                if x['date'] < mindate:
-                    continue
-
                 asset_fee = min(state['total'] / len(group) * admin_fees['asset'], admin_fees['asset_max'] - asset_fee_this_year)
-                state['pooled'] += admin_fees['fixed'] / len(group) + asset_fee + 150 / len(group)
+                state['pooled'] -= (admin_fees['fixed'] / len(group) + asset_fee) * direction
                 asset_fee_this_year += asset_fee
 
-                state['pooled'] *= interpolate(x['date']) / interpolate(prev_date)
+                state['pooled'] *= (interpolate(x['date']) / interpolate(prev_date))
                 prev_date = x['date']
 
                 if asset_code and (payout := sharesight_payouts[asset_code].get(x['date'])):
@@ -356,9 +415,9 @@ def _(sharesight_payouts, sharesight_prices):
                     # drp
                     # initial + cash * initial / price == num_shares
                     # initial == num_shares / (1 + cash / price)
-                    state['num_shares'] /= (1 + cash / 1_000_000 / x['value'])
+                    state['num_shares'] *= (1 + cash / 1_000_000 / x['value']) ** direction
 
-                state = direct_investment_func(x, state, numperiods=len(group))
+                state = direct_investment_func(x, state, numperiods=len(group), direction=direction)
 
                 data.append({
                     'fund': name.partition('-')[0],
@@ -394,7 +453,8 @@ def _(admin_fees, aussuper, choiceplus, hostplus):
 def _(aussuper, direct_investment, hostplus, mo, unisuper):
     ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
     _names = list(set(x['name'] for x in aussuper + hostplus + unisuper)) + list(direct_investment.keys())
-    selected_options = mo.ui.table(sorted(_names))
+    _names.sort()
+    selected_options = mo.ui.table([{'value': v} for v in _names], page_size=25)
     mo.vstack([
         selected_options,
         ending_balance,
@@ -402,7 +462,7 @@ def _(aussuper, direct_investment, hostplus, mo, unisuper):
     return ending_balance, selected_options
 
 
-@app.cell(hide_code=True)
+@app.cell
 def cumproduct_graph(
     alt,
     aussuper,
@@ -416,18 +476,18 @@ def cumproduct_graph(
     selected_options,
     unisuper,
 ):
-
-    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance.value)
+    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance.value, direction=-1)
     _data.extend(itertools.chain.from_iterable(make_data(
         name,
         ending_balance=ending_balance.value,
+        direction=-1,
         **kwargs
     ) for name, kwargs in direct_investment.items()))
-    _data = [x for x in _data if not selected_options.value or x['name'] in selected_options.value]
+    _data = [x for x in _data if not selected_options.value or x['name'] in (y['value'] for y in selected_options.value)]
 
-    chart = (
+    _chart = (
         alt.Chart(alt.InlineData(_data))
-        .mark_line(point=alt.OverlayMarkDef(size=5, filled=True))
+        .mark_line()
         .encode(
             x=alt.X("date:T", scale=alt.Scale(reverse=True)),
             y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
@@ -437,7 +497,45 @@ def cumproduct_graph(
         .interactive()
     )
 
-    mo.ui.altair_chart(chart)
+    mo.ui.altair_chart(_chart)
+    return
+
+
+@app.cell
+def _(
+    alt,
+    aussuper,
+    datetime,
+    direct_investment,
+    ending_balance,
+    hostplus,
+    itertools,
+    make_alldata,
+    make_data,
+    make_graph,
+    mo,
+    selected_options,
+    unisuper,
+):
+    _initial_date = datetime.datetime(2017, 1, 1)
+    _data = []
+    _data = make_alldata(aussuper, hostplus, unisuper, ending_balance=ending_balance.value, direction=1, initial_date=_initial_date)
+    _data.extend(itertools.chain.from_iterable(make_data(
+        name,
+        ending_balance=ending_balance.value,
+        initial_date=_initial_date,
+        direction=1,
+        **kwargs
+    ) for name, kwargs in direct_investment.items()))
+    _data = [x for x in _data if not selected_options.value or x['name'] in (y['value'] for y in selected_options.value)]
+
+    _graph = make_graph(
+        _data,
+        x=alt.X("date:T"),
+        y=alt.Y('balance:Q'),
+        group='name:N',
+    )
+    mo.ui.altair_chart(_graph)
     return
 
 
