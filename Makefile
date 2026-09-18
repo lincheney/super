@@ -18,11 +18,9 @@ public/australiansuper.csv:
 public/australiansuper-daily.csv:
 	curl 'https://www.australiansuper.com//api/graphs/dailyrates/download/?start=01/07/2008&end=15/09/2026&cumulative=False&superType=super&truncateDecimalPlaces=True&outputFilename=Daily%20Rates%2001%20Jul%202008%20-%2015%20Sep%202026.csv' -H 'User-Agent: ${FIREFOX}' --compressed --fail -o $@
 
-unisuper: public/unisuper/ public/unisuper.txt ;
-public/unisuper/:
+unisuper: public/unisuper.tsv ;
+public/unisuper.tsv:
 	bash extract-unisuper.sh
-public/unisuper.txt: public/unisuper/
-	ls public/unisuper/ -1 | sort > $@
 
 sharesight: public/sharesight/ public/sharesight.txt ;
 public/sharesight/:

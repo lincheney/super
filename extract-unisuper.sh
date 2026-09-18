@@ -19,16 +19,16 @@ until hrefs="$(ff do dom.get a href '{"tabId": '$tab', "attrs": {"innerText": "M
     sleep 1
 done
 
-mkdir -p public/unisuper/
+echo $'date\tname\tvalue' >public/unisuper.tsv
 while read -r url; do
     (
         echo "$url" >&2
         tab="$(ff do browser.tabs.create '{"url": "'$url'", "active": false}' | jq -re .id)"
         trap 'ff do browser.tabs.remove "$tab"' EXIT
         name="$(basename "$url")"
-        until data="$(.ff do dom.call '.tab.active figure' getAttribute data-chart '{"tabId": '$tab'}' | jq -re '.[0].result[0]')"; do
+        until data="$(ff do dom.call '.tab.active figure' getAttribute data-chart '{"tabId": '$tab'}' | jq -re '.[0].result[0]')"; do
             sleep 1
         done
-        printf %s "$data" | jq -re '["date", "value"], (.data[0].Data[] | [.Name, .Value]) | @tsv' >"public/unisuper/$name.tsv"
+        <<<"$data" jq -re '.data[0] | .InvestmentOptionTitle as $name | .Data[] | [.Name, $name, .Value] | @tsv' >>"public/unisuper.tsv"
     )
 done <<<"$hrefs"
