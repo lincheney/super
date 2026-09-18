@@ -1,10 +1,17 @@
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "marimo>=0.24.1",
+# ]
+# ///
+
 import marimo
 
-__generated_with = "0.24.0"
+__generated_with = "0.24.1"
 app = marimo.App(width="medium")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import altair as alt
     import marimo as mo
@@ -17,7 +24,7 @@ def _():
     return alt, csv, datetime, itertools, json, mo, re
 
 
-@app.cell
+@app.cell(hide_code=True)
 def admin_fees():
     admin_fees = dict(
         hostplus = dict(fixed = 78, asset = 0, asset_max = 0),
@@ -27,7 +34,7 @@ def admin_fees():
     return (admin_fees,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(aussuper, hostplus, itertools, unisuper):
     def all_super_funds():
         return itertools.chain(aussuper, hostplus, unisuper)
@@ -35,7 +42,7 @@ def _(aussuper, hostplus, itertools, unisuper):
     return (all_super_funds,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(alt, mo):
     def make_graph(data, *, height=500, **kwargs):
         return mo.ui.altair_chart(
@@ -50,7 +57,7 @@ def _(alt, mo):
     return (make_graph,)
 
 
-@app.function
+@app.function(hide_code=True)
 def no_direct_investment(asset, state=None, purchase=0, numperiods=1, *, direction):
     if state is None:
         return dict(num_shares=0, pooled=purchase, total=purchase)
@@ -59,7 +66,7 @@ def no_direct_investment(asset, state=None, purchase=0, numperiods=1, *, directi
     return state
 
 
-@app.function
+@app.function(hide_code=True)
 def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
     if state is None:
         return dict(num_shares=(purchase-5000)/asset['value'], pooled=5000, total=purchase)
@@ -83,7 +90,7 @@ def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
     return state
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(hostplus):
     def choiceplus(asset, state=None, purchase=0, numperiods=1, *, direction):
         if state is None:
@@ -122,7 +129,7 @@ def _(hostplus):
     return (choiceplus,)
 
 
-@app.function
+@app.function(hide_code=True)
 def read_file(path):
     if '://' in str(path):
         import urllib.request
@@ -133,25 +140,25 @@ def read_file(path):
             return file.read()
 
 
-@app.function
+@app.function(hide_code=True)
 def fy_of_date(date):
     return date.year + (1 if date.month >= 7 else 0)
 
 
-@app.function
+@app.function(hide_code=True)
 def cumproduct(values):
     import itertools
     return itertools.accumulate(values, lambda x, y: x * y)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def load_hostplus(csv, mo):
     _file = mo.notebook_location()/'public'/'hostplus.tsv'
     hostplus_raw = list(csv.DictReader(read_file(_file).decode().splitlines(), delimiter='\t'))
     return (hostplus_raw,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def parse_hostplus(datetime, hostplus_raw, itertools, mo):
     _data = [{
 
@@ -173,7 +180,7 @@ def parse_hostplus(datetime, hostplus_raw, itertools, mo):
     return (hostplus,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def load_aussuper(csv, mo):
     _file = mo.notebook_location()/'public'/'australiansuper.csv'
     aussuper_annual_raw = list(csv.DictReader(read_file(_file).decode('latin1').splitlines()))
@@ -182,7 +189,7 @@ def load_aussuper(csv, mo):
     return aussuper_annual_raw, aussuper_daily_raw
 
 
-@app.cell
+@app.cell(hide_code=True)
 def load_unisuper(csv, mo):
     _directory = mo.notebook_location()/'public'/'unisuper'
     _files = read_file(mo.notebook_location()/'public'/'unisuper.txt').decode().splitlines()
@@ -193,7 +200,7 @@ def load_unisuper(csv, mo):
     return (unisuper_raw,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def load_sharesight(json, mo):
     _directory = mo.notebook_location()/'public'/'sharesight'
     _files = read_file(mo.notebook_location()/'public'/'sharesight.txt').decode().splitlines()
@@ -205,7 +212,7 @@ def load_sharesight(json, mo):
     return (sharesight_raw,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def parse_sharesight(datetime, sharesight_raw):
     sharesight_prices = {}
     sharesight_payouts = {}
@@ -229,7 +236,7 @@ def parse_sharesight(datetime, sharesight_raw):
     return sharesight_payouts, sharesight_prices
 
 
-@app.cell
+@app.cell(hide_code=True)
 def parse_unisuper(datetime, itertools, mo, unisuper_raw):
     unisuper = []
 
@@ -254,7 +261,7 @@ def parse_unisuper(datetime, itertools, mo, unisuper_raw):
     return (unisuper,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def parse_aussuper(
     aussuper_annual_raw,
     aussuper_daily_raw,
@@ -300,7 +307,7 @@ def parse_aussuper(
     return (aussuper,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(admin_fees, make_data):
     def make_alldata(*args, direction, **kwargs):
         import itertools
@@ -322,7 +329,7 @@ def _(admin_fees, make_data):
     return (make_alldata,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(datetime, sharesight_payouts, sharesight_prices):
     def make_data(
         name,
@@ -421,7 +428,7 @@ def _(datetime, sharesight_payouts, sharesight_prices):
     return (make_data,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(admin_fees, aussuper, choiceplus, hostplus):
     _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
     _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares - Indexed']
@@ -438,7 +445,7 @@ def _(admin_fees, aussuper, choiceplus, hostplus):
     return (direct_investment,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(aussuper, direct_investment, hostplus, mo, unisuper):
     ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
     _names = list(set(x['name'] for x in aussuper + hostplus + unisuper)) + list(direct_investment.keys())
@@ -451,7 +458,7 @@ def _(aussuper, direct_investment, hostplus, mo, unisuper):
     return ending_balance, selected_options
 
 
-@app.cell
+@app.cell(hide_code=True)
 def cumproduct_graph(
     all_super_funds,
     alt,
@@ -482,7 +489,7 @@ def cumproduct_graph(
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(all_super_funds, mo):
     starting_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
     _start = min(x['date'] for x in all_super_funds()).date()
@@ -495,7 +502,7 @@ def _(all_super_funds, mo):
     return starting_balance, starting_date
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     all_super_funds,
     datetime,
