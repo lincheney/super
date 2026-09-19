@@ -29,7 +29,7 @@ def _():
     return CGT, TAX, alt, csv, datetime, itertools, json, mo, re, statistics
 
 
-@app.cell(hide_code=True)
+@app.cell
 def admin_fees():
     admin_fees = dict(
         hostplus = dict(fixed = 78, asset = 0, asset_max = 0),
@@ -39,6 +39,191 @@ def admin_fees():
         stake = dict(fixed = 1319, asset = 0, asset_max = 0),
     )
     return (admin_fees,)
+
+
+@app.cell(hide_code=True)
+def forward_graph_controls(all_super_funds, direct_investment, mo, re):
+    starting_balance = mo.ui.number(start=1, value=1_000_000, label="Starting balance")
+
+    _names = list(set(x['name'] for x in all_super_funds())) + list(direct_investment.keys())
+    _names.sort()
+    # show "best" performing funds by default
+    #  _default = [name for perf, name in sorted(mean_performance)[-10:]]
+    _default = [x for x in _names if re.search('international shares|^balanced$', x.lower().partition('-')[2])]
+    forward_selected_options = mo.ui.multiselect(options=_names, value=_default, label='Filter')
+
+    _start = min(x['date'] for x in all_super_funds()).date()
+    _stop = max(x['date'] for x in all_super_funds()).date()
+    starting_date = mo.ui.date(start=_start, stop=_stop, value='2017-01-01', label="Start Date")
+
+    allow_missing_data = mo.ui.checkbox(label='Show even if missing data')
+
+    mo.vstack([
+        starting_balance,
+        starting_date,
+        forward_selected_options,
+        allow_missing_data,
+    ])
+    return (
+        allow_missing_data,
+        forward_selected_options,
+        starting_balance,
+        starting_date,
+    )
+
+
+@app.cell(hide_code=True)
+def forward_graph(
+    all_super_funds,
+    allow_missing_data,
+    datetime,
+    direct_investment,
+    forward_selected_options,
+    itertools,
+    make_alldata,
+    make_graph,
+    mo,
+    starting_balance,
+    starting_date,
+):
+    _initial_date = datetime.datetime(starting_date.value.year, starting_date.value.month, starting_date.value.day)
+    _data = make_alldata(
+        all_super_funds(),
+        direct_investment,
+        balance=starting_balance.value,
+        direction=1,
+        initial_date=_initial_date,
+        filter=forward_selected_options.value
+    )
+    if not allow_missing_data.value:
+        _data.sort(key=lambda x: (x['name'], x['date']))
+        _missing_data = set()
+        for _k, _g in itertools.groupby(_data, lambda x: x['name']):
+            if (next(_g)['date'] - _initial_date).days > 29:
+                _missing_data.add(_k)
+        _data = [x for x in _data if x['name'] not in _missing_data]
+    mo.ui.altair_chart(make_graph(
+        _data,
+        x='date:T',
+        y='balance:Q',
+        color='name:N',
+    ))
+    return
+
+
+@app.cell(hide_code=True)
+def backward_graph_controls(all_super_funds, direct_investment, mo, re):
+    ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
+
+    _names = list(set(x['name'] for x in all_super_funds())) + list(direct_investment.keys())
+    _names.sort()
+    # show "best" performing funds by default
+    #  _default = [name for perf, name in sorted(mean_performance)[-10:]]
+    _default = [x for x in _names if re.search('international shares|^balanced$', x.lower().partition('-')[2])]
+    backward_selected_options = mo.ui.multiselect(options=_names, value=_default, label='Filter')
+
+    mo.vstack([
+        backward_selected_options,
+        ending_balance,
+    ])
+    return backward_selected_options, ending_balance
+
+
+@app.cell(hide_code=True)
+def backward_graph(
+    all_super_funds,
+    alt,
+    backward_selected_options,
+    direct_investment,
+    ending_balance,
+    make_alldata,
+    make_graph,
+    mo,
+):
+    mo.ui.altair_chart(make_graph(
+        make_alldata(
+            all_super_funds(),
+            direct_investment,
+            balance=ending_balance.value,
+            direction=-1,
+            filter=backward_selected_options.value
+        ),
+        x=alt.X('date:T', scale=alt.Scale(reverse=True)),
+        y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
+        color='name:N',
+    ))
+    return
+
+
+@app.cell(hide_code=True)
+def direct_investment_early_sell_graph(
+    CGT,
+    admin_fees,
+    alt,
+    datetime,
+    direct_investment,
+    hostplus,
+    itertools,
+    make_data,
+    mo,
+    starting_balance,
+    statistics,
+):
+    _long_ago = datetime.datetime(1900, 1, 1)
+    _name = 'hostplus-International Shares'
+    _hostplus_pooled = [x for x in hostplus if x['name'] == _name]
+    _hostplus_pooled = (_name, {'pooled_returns': _hostplus_pooled, 'admin_fees': admin_fees['hostplus']})
+
+    _data = []
+    _grid = list(direct_investment.items()) + [_hostplus_pooled]
+    for _name, _kwargs in _grid:
+        if 'VAS' in _name or 'stake' in _name:
+            continue
+        _mindate = next(itertools.islice(make_data(_name, balance=starting_balance.value, direction=1, initial_date=_long_ago, **_kwargs), 1, 2))['date']
+        for _year in range(fy_of_date(_mindate), fy_of_date(datetime.date.today())):
+            _date = datetime.datetime(_year, 7, 1)
+            for _i, _row in enumerate(make_data(_name, balance=starting_balance.value, direction=1, initial_date=_date, **_kwargs)):
+                if _i < 1:
+                    _mindate = _row['date']
+                else:
+                    # sell it all now!
+                    # ignore brokerage for now
+                    _row['balance'] -= (_row['capital'] - _row['cost_base'] + _row['deferred_income']) * CGT
+                    _row['elapsed'] = round((_row['date'] - _mindate).days / 365, 1)
+                    _data.append({'name': _row['name'], 'balance': _row['balance'], 'elapsed': _row['elapsed']})
+
+    _data = [x for x in _data if x['elapsed'] <= 10]
+    _data.sort(key=lambda x: (x['name'], x['elapsed']))
+    _quantiles = []
+    for _k, _g in itertools.groupby(_data, key=lambda x: (x['name'], x['elapsed'])):
+        _g = [x['balance'] for x in _g]
+        _mean = statistics.mean(_g)
+        _z = 1.96
+        _t = _z + (_z**3 + _z) / 4 / (len(_g) - 1)
+        _delta = _t * statistics.stdev(_g) / len(_g) ** 0.5
+        _q = [_mean - _delta, _mean + _delta]
+        #  _q = statistics.quantiles((x['balance'] for x in _g), n=10, method='inclusive')
+        _quantiles.append({'name': _k[0], 'elapsed': _k[1], 'upper': _q[-1], 'lower': _q[0]})
+
+    _chart = (
+        alt.Chart(alt.InlineData(_quantiles))
+        .mark_area(opacity=0.5)
+        .encode(x='elapsed:Q', y='lower:Q', y2='upper:Q', color='name:N', stroke='name:N')
+    )
+    mo.ui.altair_chart(
+        _chart
+        .properties(width="container", height=500)
+        .interactive()
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## extra code below
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -120,8 +305,8 @@ def _(do_transaction):
 
         if state is None:
             shares, leftover, fee = purchase - 5000, 0, 0
-            if direction == 1:
-                shares, leftover, fee = calc_brokerage(shares, brokerage)
+            #  if direction == 1:
+                #  shares, leftover, fee = calc_brokerage(shares, brokerage)
             return dict(
                 num_shares=shares/asset['value'],
                 pooled=5000 + leftover,
@@ -153,8 +338,8 @@ def _(TAX, do_transaction, hostplus):
         if state is None:
             pooled = max(purchase * 0.2, 2000)
             shares, leftover, fee = purchase - pooled - 200, 0, 0
-            if direction == 1:
-                shares, leftover, fee = calc_brokerage(shares, brokerage)
+            #  if direction == 1:
+                #  shares, leftover, fee = calc_brokerage(shares, brokerage)
             return dict(
                 num_shares=shares/asset['value'],
                 pooled=pooled+leftover,
@@ -198,8 +383,8 @@ def _(do_transaction):
 
         if state is None:
             shares, leftover, fee = purchase, 0, 0
-            if direction == 1:
-                shares, leftover, fee = calc_brokerage(shares, brokerage)
+            #  if direction == 1:
+                #  shares, leftover, fee = calc_brokerage(shares, brokerage)
             return dict(
                 num_shares=shares/asset['value'],
                 pooled=0,
@@ -432,21 +617,32 @@ def parse_aussuper(
 
 @app.cell(hide_code=True)
 def _(admin_fees, make_data):
-    def make_alldata(*args, direction, **kwargs):
+    def make_alldata(pooled_funds, direct_investment, direction, filter=None, **kwargs):
         import itertools
-        alldata = sorted(itertools.chain.from_iterable(args), key=lambda x: (x['name'], x['date'].timestamp() * direction))
+        if filter:
+            pooled_funds = [x for x in pooled_funds if x['name'] in filter]
+            direct_investment = {k: v for k, v in direct_investment.items() if k in filter}
+        pooled_funds = sorted(pooled_funds, key=lambda x: (x['name'], x['date'].timestamp() * direction))
         data = []
-        for _, group in itertools.groupby(alldata, key=lambda x: x['name']):
+        for name, group in itertools.groupby(pooled_funds, key=lambda x: x['name']):
             group = [x for x in group if x['value'] is not None]
             data.extend(make_data(
-                group[0]['name'],
+                name,
                 group,
-                admin_fees[group[0]['fund']],
+                admin_fees[name.split('-')[0]],
                 asset_code=None,
                 direct_investment_func=no_direct_investment,
                 direction=direction,
                 **kwargs,
             ))
+
+        data.extend(itertools.chain.from_iterable(make_data(
+            name,
+            direction=direction,
+            **kwargs,
+            **k
+        ) for name, k in direct_investment.items()))
+
         return data
 
     return (make_alldata,)
@@ -472,6 +668,7 @@ def _(CGT, TAX, datetime, sharesight_payouts, sharesight_prices):
         asset = sharesight_prices[asset_code] if asset_code else pooled_returns
         asset = sorted(asset, reverse=direction==-1, key=lambda x: x['date'])
         mindate = min(x['date'] for x in pooled_returns)
+        maxdate = max(x['date'] for x in pooled_returns)
 
         def interpolate(date):
             prev = max((x for x in pooled_returns if x['date'] <= date), key=lambda x: x['date'])
@@ -486,6 +683,8 @@ def _(CGT, TAX, datetime, sharesight_payouts, sharesight_prices):
         prev_date = initial_date
         if direction == 1:
             mindate = prev_date = max(prev_date, mindate)
+        else:
+            maxdate = prev_date = min(prev_date, maxdate)
 
         # init
         asset = [a for a in asset if a['date'] >= mindate]
@@ -575,151 +774,15 @@ def _(admin_fees, aussuper, choiceplus, hostplus, memberdirect, stake_smsf):
 
 
 @app.cell(hide_code=True)
-def _(art, aussuper, direct_investment, hostplus, mo, unisuper):
-    ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance")
-    _names = list(set(x['name'] for x in art + aussuper + hostplus + unisuper)) + list(direct_investment.keys())
-    _names.sort()
-    selected_options = mo.ui.multiselect(options=_names, label='Filter')
-    mo.vstack([
-        selected_options,
-        ending_balance,
-    ])
-    return ending_balance, selected_options
-
-
-@app.cell(hide_code=True)
-def cumproduct_graph(
-    all_super_funds,
-    alt,
-    direct_investment,
-    ending_balance,
-    itertools,
-    make_alldata,
-    make_data,
-    make_graph,
-    mo,
-    selected_options,
-):
-    _data = make_alldata(all_super_funds(), balance=ending_balance.value, direction=-1)
-    _data.extend(itertools.chain.from_iterable(make_data(
-        name,
-        balance=ending_balance.value,
-        direction=-1,
-        **kwargs
-    ) for name, kwargs in direct_investment.items()))
-    _data = [x for x in _data if not selected_options.value or x['name'] in selected_options.value]
-
-    mo.ui.altair_chart(make_graph(
-        _data,
-        x=alt.X('date:T', scale=alt.Scale(reverse=True)),
-        y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
-        color='name:N',
-    ))
-    return
-
-
-@app.cell(hide_code=True)
-def _(all_super_funds, mo):
-    starting_balance = mo.ui.number(start=1, value=1_000_000, label="Starting balance")
-    _start = min(x['date'] for x in all_super_funds()).date()
-    _stop = max(x['date'] for x in all_super_funds()).date()
-    starting_date = mo.ui.date(start=_start, stop=_stop, value='2017-01-01', label="Start Date")
-    mo.vstack([
-        starting_balance,
-        starting_date,
-    ])
-    return starting_balance, starting_date
-
-
-@app.cell(hide_code=True)
-def _(
-    all_super_funds,
-    datetime,
-    direct_investment,
-    itertools,
-    make_alldata,
-    make_data,
-    make_graph,
-    mo,
-    selected_options,
-    starting_balance,
-    starting_date,
-):
-    _initial_date = datetime.datetime(starting_date.value.year, starting_date.value.month, starting_date.value.day)
-    _data = []
-    _data = make_alldata(all_super_funds(), balance=starting_balance.value, direction=1, initial_date=_initial_date)
-    _data.extend(itertools.chain.from_iterable(make_data(
-        name,
-        balance=starting_balance.value,
-        initial_date=_initial_date,
-        direction=1,
-        **kwargs
-    ) for name, kwargs in direct_investment.items()))
-    _data = [x for x in _data if not selected_options.value or x['name'] in selected_options.value]
-
-    mo.ui.altair_chart(make_graph(
-        _data,
-        x='date:T',
-        y='balance:Q',
-        color='name:N',
-    ))
-    return
-
-
-@app.cell
-def _(
-    CGT,
-    admin_fees,
-    alt,
-    datetime,
-    direct_investment,
-    hostplus,
-    itertools,
-    make_data,
-    mo,
-    starting_balance,
-    statistics,
-):
-    _long_ago = datetime.datetime(1900, 1, 1)
-    _name = 'hostplus-International Shares'
-    _hostplus_pooled = [x for x in hostplus if x['name'] == _name]
-    _hostplus_pooled = (_name, {'pooled_returns': _hostplus_pooled, 'admin_fees': admin_fees['hostplus']})
-
-    _data = []
-    _grid = list(direct_investment.items()) + [_hostplus_pooled]
-    for _name, _kwargs in _grid:
-        if 'VAS' in _name or 'stake' in _name:
-            continue
-        _mindate = next(itertools.islice(make_data(_name, balance=starting_balance.value, direction=1, initial_date=_long_ago, **_kwargs), 1, 2))['date']
-        for _year in range(fy_of_date(_mindate), fy_of_date(datetime.date.today())):
-            _date = datetime.datetime(_year, 7, 1)
-            for _i, _row in enumerate(make_data(_name, balance=starting_balance.value, direction=1, initial_date=_date, **_kwargs)):
-                if _i < 1:
-                    _mindate = _row['date']
-                else:
-                    # sell it all now!
-                    # ignore brokerage for now
-                    _row['balance'] += (_row['capital'] - _row['cost_base']) * (1 - CGT) - _row['deferred_income'] * CGT
-                    _row['elapsed'] = round((_row['date'] - _mindate).days / 365, 1)
-                    _data.append({'name': _row['name'], 'balance': _row['balance'], 'elapsed': _row['elapsed']})
-
-    _data = [x for x in _data if x['elapsed'] <= 10]
-    _data.sort(key=lambda x: (x['name'], x['elapsed']))
-    _quantiles = []
-    for _k, _g in itertools.groupby(_data, key=lambda x: (x['name'], x['elapsed'])):
-        _q = statistics.quantiles((x['balance'] for x in _g), n=20, method='inclusive')
-        _quantiles.append({'name': _k[0], 'elapsed': _k[1], 'upper': _q[-1], 'lower': _q[0]})
-
-    _chart = (
-        alt.Chart(alt.InlineData(_quantiles))
-        .mark_area(opacity=0.5)
-        .encode(x='elapsed:Q', y='lower:Q', y2='upper:Q', color='name:N', stroke='name:N')
-    )
-    mo.ui.altair_chart(
-        _chart
-        .properties(width="container", height=500)
-        .interactive()
-    )
+def calc_mean_perforance(all_super_funds, itertools):
+    mean_performance = []
+    _data = sorted(all_super_funds(), key=lambda x: (x['name'], x['date']))
+    for _k, _g in itertools.groupby(_data, key=lambda x: x['name']):
+        _g = list(_g)
+        _days = (_g[-1]['date'] - _g[0]['date']).days
+        if _days > 365 * 5:
+            _perf = list(cumproduct(x['value'] for x in _g))[-1]
+            mean_performance.append((_perf ** (365 / _days), _k))
     return
 
 
