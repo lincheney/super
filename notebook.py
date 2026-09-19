@@ -19,10 +19,14 @@ def _():
     import csv
     import datetime
     import itertools
-    import math
+    import statistics
     import re
 
-    return alt, csv, datetime, itertools, json, mo, re
+    TAX = 0.15
+    CGT = 0.1
+
+    mo._runtime.context.get_context().marimo_config["runtime"]["output_max_bytes"] = 20_000_000
+    return CGT, TAX, alt, csv, datetime, itertools, json, mo, re, statistics
 
 
 @app.cell(hide_code=True)
@@ -32,6 +36,7 @@ def admin_fees():
         aussuper = dict(fixed = 52, asset = 0.12/100, asset_max = 600),
         unisuper = dict(fixed = 0, asset = 2/100, asset_max = 96),
         art = dict(fixed = 1.1*52, asset = 0.1/100, asset_max = 0.1/100*500_000),
+        stake = dict(fixed = 1319, asset = 0, asset_max = 0),
     )
     return (admin_fees,)
 
@@ -62,7 +67,7 @@ def _(alt, mo):
 @app.function(hide_code=True)
 def calc_brokerage(amount, brokerage):
     if amount >= 0 and brokerage(0) > amount:
-        return 0, amount
+        return 0, amount, 0
 
     low = min(amount, 0)
     high = max(amount, 0)
@@ -75,52 +80,88 @@ def calc_brokerage(amount, brokerage):
             low = mid
         else:
             high = mid
-    return mid, 0
+    return mid, 0, brokerage(mid)
+
+
+@app.cell(hide_code=True)
+def _(CGT):
+    def do_transaction(state, asset, value, brokerage):
+        if value > 0:
+            # buy
+            value, leftover, fee = calc_brokerage(value, brokerage)
+            state['cost_base'] += fee + value
+        else:
+            # sell
+            value, leftover, fee = calc_brokerage(value, lambda x: brokerage(x) + CGT * -x/asset['value'] * max(0, asset['value'] - (state['cost_base'] + brokerage(x)) / state['num_shares']))
+            state['cost_base'] += brokerage(value)
+            state['cost_base'] -= state['cost_base'] / state['num_shares'] * abs(value)/asset['value']
+
+        state['num_shares'] += value/asset['value']
+        state['pooled'] += leftover
+        return state
+
+    return (do_transaction,)
 
 
 @app.function(hide_code=True)
 def no_direct_investment(asset, state=None, purchase=0, numperiods=1, *, direction):
     if state is None:
-        return dict(num_shares=0, pooled=purchase, total=purchase)
+        return dict(num_shares=0, pooled=purchase, total=purchase, cost_base=0)
     state['pooled'] += purchase * direction
     state['total'] = state['pooled']
     return state
 
 
-@app.function(hide_code=True)
-def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
-    def brokerage(amount):
-        return 10 + 0.08/100 * min(max(0, amount - 12_500), 50_000) + 0.04/100 * max(0, amount - 50_000)
+@app.cell(hide_code=True)
+def _(do_transaction):
+    def memberdirect(asset, state=None, purchase=0, numperiods=1, *, direction):
+        def brokerage(amount):
+            return 10 + 0.08/100 * min(max(0, amount - 12_500), 50_000) + 0.04/100 * max(0, amount - 50_000)
 
-    if state is None:
-        shares, leftover = calc_brokerage(purchase - 5000, brokerage)
-        return dict(num_shares=shares/asset['value'], pooled=5000 + leftover, total=purchase)
+        if state is None:
+            shares, leftover, fee = purchase - 5000, 0, 0
+            if direction == 1:
+                shares, leftover, fee = calc_brokerage(shares, brokerage)
+            return dict(
+                num_shares=shares/asset['value'],
+                pooled=5000 + leftover,
+                total=purchase,
+                cost_base=shares+fee,
+            )
 
-    state['pooled'] -= 150 / numperiods * direction
+        state['pooled'] -= 150 / numperiods * direction
 
-    share_diff = purchase * direction
-    if state['pooled'] < 5000:
-        share_diff -= 5000 - state['pooled']
-        state['pooled'] = 5000
-    if share_diff:
-        share_diff, leftover = calc_brokerage(share_diff, brokerage)
-        state['num_shares'] += share_diff / asset['value'] * direction
-        state['pooled'] += leftover * direction
+        share_diff = purchase * direction
+        if state['pooled'] < 5000:
+            share_diff -= 5000 - state['pooled']
+            state['pooled'] = 5000
+        if share_diff:
+            state = do_transaction(state, asset, share_diff * direction, brokerage)
 
-    state['total'] = state['num_shares'] * asset['value'] + state['pooled']
-    return state
+        state['total'] = state['num_shares'] * asset['value'] + state['pooled']
+        return state
+
+    return (memberdirect,)
 
 
 @app.cell(hide_code=True)
-def _(hostplus):
+def _(TAX, do_transaction, hostplus):
     def choiceplus(asset, state=None, purchase=0, numperiods=1, *, direction):
         def brokerage(amount):
             return 13 + 0.1/100 * max(0, amount - 13_000)
 
         if state is None:
             pooled = max(purchase * 0.2, 2000)
-            shares, leftover = calc_brokerage(purchase - pooled - 200, brokerage)
-            return dict(num_shares=shares/asset['value'], pooled=pooled+leftover, transaction=200, total=purchase)
+            shares, leftover, fee = purchase - pooled - 200, 0, 0
+            if direction == 1:
+                shares, leftover, fee = calc_brokerage(shares, brokerage)
+            return dict(
+                num_shares=shares/asset['value'],
+                pooled=pooled+leftover,
+                transaction=200,
+                total=purchase,
+                cost_base=shares + fee,
+            )
 
         def total():
             return state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
@@ -128,7 +169,7 @@ def _(hostplus):
         # interest on transaction account, use the rate from the cash option
         interest = min((x for x in hostplus if x['name'] == 'hostplus-Cash'), key=lambda x: abs(x['date'] - asset['date']))
         interest = interest['value'] ** (12 / numperiods)
-        state['transaction'] += state['transaction'] * ((interest - 1) * 0.85 - 0.1/100/numperiods) * direction
+        state['transaction'] += state['transaction'] * ((interest - 1) * (1 - TAX) - 0.1/100/numperiods) * direction
         if state['transaction'] < 200:
             state['pooled'] -= 200 - state['transaction']
             state['transaction'] = 200
@@ -141,14 +182,45 @@ def _(hostplus):
             share_diff -= required_pooled - state['pooled']
             state['pooled'] = required_pooled
         if share_diff:
-            share_diff, leftover = calc_brokerage(share_diff, brokerage)
-            state['num_shares'] += share_diff / asset['value'] * direction
-            state['pooled'] += leftover * direction
+            state = do_transaction(state, asset, share_diff * direction, brokerage)
 
         state['total'] = total()
         return state
 
     return (choiceplus,)
+
+
+@app.cell(hide_code=True)
+def _(do_transaction):
+    def stake_smsf(asset, state=None, purchase=0, numperiods=1, *, direction):
+        def brokerage(amount):
+            return 3 + 0.01/100 * max(0, amount - 30_000)
+
+        if state is None:
+            shares, leftover, fee = purchase, 0, 0
+            if direction == 1:
+                shares, leftover, fee = calc_brokerage(shares, brokerage)
+            return dict(
+                num_shares=shares/asset['value'],
+                pooled=0,
+                cash=leftover,
+                total=purchase,
+                cost_base=shares+fee,
+            )
+
+        share_diff = purchase * direction
+        if state['cash'] < 0:
+            share_diff += state['cash']
+            state['cash'] = 0
+        if share_diff:
+            state = do_transaction(state, asset, share_diff * direction, brokerage)
+            state['cash'] = state['pooled']
+            state['pooled'] = 0
+
+        state['total'] = state['num_shares'] * asset['value'] + state['pooled'] + state['cash']
+        return state
+
+    return (stake_smsf,)
 
 
 @app.function(hide_code=True)
@@ -370,8 +442,8 @@ def _(admin_fees, make_data):
                 group[0]['name'],
                 group,
                 admin_fees[group[0]['fund']],
-                None,
-                no_direct_investment,
+                asset_code=None,
+                direct_investment_func=no_direct_investment,
                 direction=direction,
                 **kwargs,
             ))
@@ -381,17 +453,17 @@ def _(admin_fees, make_data):
 
 
 @app.cell(hide_code=True)
-def _(datetime, sharesight_payouts, sharesight_prices):
+def _(CGT, TAX, datetime, sharesight_payouts, sharesight_prices):
     def make_data(
         name,
         pooled_returns,
         admin_fees,
-        asset_code,
-        direct_investment_func,
         *,
+        asset_code=None,
+        direct_investment_func=no_direct_investment,
         direction,
         balance,
-        initial_date=datetime.datetime(2027, 7, 1),
+        initial_date=datetime.datetime.today() + datetime.timedelta(days=7),
     ):
         import itertools
 
@@ -411,10 +483,6 @@ def _(datetime, sharesight_payouts, sharesight_prices):
                 fraction = (date - next['date']) / (next['date'] - prev['date'])
                 return prev['cumulative'] * (next['value'] ** fraction)
 
-        deferred_income = 0
-        cost_base = 0
-        data = []
-
         prev_date = initial_date
         if direction == 1:
             mindate = prev_date = max(prev_date, mindate)
@@ -422,16 +490,19 @@ def _(datetime, sharesight_payouts, sharesight_prices):
         # init
         asset = [a for a in asset if a['date'] >= mindate]
         if not asset:
-            return ()
+            return
         state = direct_investment_func(asset[0], None, purchase=balance, direction=direction)
+        state.setdefault('deferred_income', 0)
 
-        data.append({
+        yield {
             'fund': name.partition('-')[0],
             'name': name,
             'balance': state['total'],
             'date': prev_date,
-            'deferred_income': deferred_income,
-        })
+            'deferred_income': state['deferred_income'],
+            'cost_base': state['cost_base'],
+            'capital': state['num_shares'] * asset[0]['value'],
+        }
         for _, group in itertools.groupby(asset, key=lambda x: fy_of_date(x['date'])):
             group = list(group)
             asset_fee_this_year = 0
@@ -445,7 +516,7 @@ def _(datetime, sharesight_payouts, sharesight_prices):
 
                 if asset_code and (payout := sharesight_payouts[asset_code].get(x['date'])):
                     au_local_dividend = payout['au_local_dividend']
-                    deferred_income += au_local_dividend['deferred_income'] * state['num_shares'] / 1_000_000
+                    state['deferred_income'] += au_local_dividend['deferred_income'] * state['num_shares'] / 1_000_000
 
                     cash = au_local_dividend['amount']
                     taxable = sum(au_local_dividend[k] for k in ['foreign_source_income', 'unfranked_amount', 'interest_payment_amount', 'franked_amount', 'non_discounted_capital_gains'])
@@ -453,38 +524,43 @@ def _(datetime, sharesight_payouts, sharesight_prices):
                     tax_credit = sum(au_local_dividend[k] for k in ['non_resident_withholding_tax', 'tax_credit'])
                     if tax_credit <= taxable:
                         taxable -= tax_credit
-                        cash -= taxable * 0.15 + discounted_taxable * 0.1
+                        cash -= taxable * TAX + discounted_taxable * CGT
                     elif tax_credit < taxable + discounted_taxable:
                         discounted_taxable -= tax_credit - taxable
-                        cash -= discounted_taxable * 0.1
+                        cash -= discounted_taxable * CGT
                     assert cash >= 0, cash
 
-                    # drp
+                    state['cost_base'] += au_local_dividend['amit_increase_amount'] * state['num_shares'] / 1_000_000
+                    state['cost_base'] -= au_local_dividend['amit_decrease_amount'] * state['num_shares'] / 1_000_000
+
+                    # drp - no brokerage
                     # initial + cash * initial / price == num_shares
                     # initial == num_shares / (1 + cash / price)
                     state['num_shares'] *= (1 + cash / 1_000_000 / x['value']) ** direction
+                    state['cost_base'] += cash / 1_000_000 * direction
 
                 state = direct_investment_func(x, state, numperiods=len(group), direction=direction)
 
-                data.append({
+                yield {
                     'fund': name.partition('-')[0],
                     'name': name,
                     'date': x['date'],
                     'balance': state['total'],
-                    'deferred_income': deferred_income,
-                })
-
-        return data
+                    'deferred_income': state['deferred_income'],
+                    'cost_base': state['cost_base'],
+                    'capital': state['num_shares'] * x['value'],
+                }
 
     return (make_data,)
 
 
 @app.cell(hide_code=True)
-def _(admin_fees, aussuper, choiceplus, hostplus):
+def _(admin_fees, aussuper, choiceplus, hostplus, memberdirect, stake_smsf):
     _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
     _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares']
     _memberdirect = dict(direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled)
     _choiceplus = dict(direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled)
+    _stake = dict(direct_investment_func=stake_smsf, admin_fees=admin_fees['stake'], pooled_returns=_hostplus_pooled)
     direct_investment = {
         'aussuper-memberdirect-VGS': dict(asset_code='VGS', **_memberdirect),
         'aussuper-memberdirect-VAS': dict(asset_code='VAS', **_memberdirect),
@@ -492,6 +568,8 @@ def _(admin_fees, aussuper, choiceplus, hostplus):
         'hostplus-choiceplus-VGS': dict(asset_code='VGS', **_choiceplus),
         'hostplus-choiceplus-VAS': dict(asset_code='VAS', **_choiceplus),
         'hostplus-choiceplus-IVV': dict(asset_code='IVV', **_choiceplus),
+        'stake-smsf-VGS': dict(asset_code='VGS', **_stake),
+        'stake-smsf-IVV': dict(asset_code='IVV', **_stake),
     }
     return (direct_investment,)
 
@@ -585,6 +663,63 @@ def _(
         y='balance:Q',
         color='name:N',
     ))
+    return
+
+
+@app.cell
+def _(
+    CGT,
+    admin_fees,
+    alt,
+    datetime,
+    direct_investment,
+    hostplus,
+    itertools,
+    make_data,
+    mo,
+    starting_balance,
+    statistics,
+):
+    _long_ago = datetime.datetime(1900, 1, 1)
+    _name = 'hostplus-International Shares'
+    _hostplus_pooled = [x for x in hostplus if x['name'] == _name]
+    _hostplus_pooled = (_name, {'pooled_returns': _hostplus_pooled, 'admin_fees': admin_fees['hostplus']})
+
+    _data = []
+    _grid = list(direct_investment.items()) + [_hostplus_pooled]
+    for _name, _kwargs in _grid:
+        if 'VAS' in _name or 'stake' in _name:
+            continue
+        _mindate = next(itertools.islice(make_data(_name, balance=starting_balance.value, direction=1, initial_date=_long_ago, **_kwargs), 1, 2))['date']
+        for _year in range(fy_of_date(_mindate), fy_of_date(datetime.date.today())):
+            _date = datetime.datetime(_year, 7, 1)
+            for _i, _row in enumerate(make_data(_name, balance=starting_balance.value, direction=1, initial_date=_date, **_kwargs)):
+                if _i < 1:
+                    _mindate = _row['date']
+                else:
+                    # sell it all now!
+                    # ignore brokerage for now
+                    _row['balance'] += (_row['capital'] - _row['cost_base']) * (1 - CGT) - _row['deferred_income'] * CGT
+                    _row['elapsed'] = round((_row['date'] - _mindate).days / 365, 1)
+                    _data.append({'name': _row['name'], 'balance': _row['balance'], 'elapsed': _row['elapsed']})
+
+    _data = [x for x in _data if x['elapsed'] <= 10]
+    _data.sort(key=lambda x: (x['name'], x['elapsed']))
+    _quantiles = []
+    for _k, _g in itertools.groupby(_data, key=lambda x: (x['name'], x['elapsed'])):
+        _q = statistics.quantiles((x['balance'] for x in _g), n=20, method='inclusive')
+        _quantiles.append({'name': _k[0], 'elapsed': _k[1], 'upper': _q[-1], 'lower': _q[0]})
+
+    _chart = (
+        alt.Chart(alt.InlineData(_quantiles))
+        .mark_area(opacity=0.5)
+        .encode(x='elapsed:Q', y='lower:Q', y2='upper:Q', color='name:N', stroke='name:N')
+    )
+    mo.ui.altair_chart(
+        _chart
+        .properties(width="container", height=500)
+        .interactive()
+    )
     return
 
 
