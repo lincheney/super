@@ -145,14 +145,18 @@ def backward_graph_controls(all_super_funds, direct_investment, mo, re):
     _default = [x for x in _names if re.search('international shares|overseasshares|^balanced$', x.lower().partition('-')[2])]
     backward_selected_options = mo.ui.multiselect(options=_names, value=_default, label='Filter')
 
+    backward_y_log = mo.ui.checkbox(label='Log scale for y axis')
+
     mo.vstack([
         ending_balance,
         mo.hstack([ending_contributions_input, ending_contributions_freq_input, mo.md('times per year')], justify='start'),
         mo.hstack([ending_direct_investment_freq_input, mo.md('times per year'), ending_direct_investment_min_input], justify='start'),
         backward_selected_options,
+        backward_y_log,
     ])
     return (
         backward_selected_options,
+        backward_y_log,
         ending_balance,
         ending_contributions_freq_input,
         ending_contributions_input,
@@ -166,6 +170,7 @@ def backward_graph(
     all_super_funds,
     alt,
     backward_selected_options,
+    backward_y_log,
     direct_investment,
     ending_balance,
     ending_contributions_freq_input,
@@ -187,7 +192,7 @@ def backward_graph(
             direct_investment_buys=(ending_direct_investment_min_input.value, ending_direct_investment_freq_input.value),
         ),
         x=alt.X('date:T', scale=alt.Scale(reverse=True)),
-        y=alt.Y('balance:Q', scale=alt.Scale(reverse=True)),
+        y=alt.Y('balance:Q', scale=alt.Scale(reverse=True, type='symlog' if backward_y_log.value else 'linear', zero=False)),
         color='name:N',
     ))
     return
