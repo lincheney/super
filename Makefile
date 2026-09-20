@@ -30,9 +30,13 @@ public/sharesight.txt: public/sharesight/
 
 art: public/art.tsv ;
 public/art.tsv:
-	bash -x extract-art.sh
+	bash extract-art.sh
 
 rest: public/rest.tsv ;
 public/rest.tsv:
 	today="$$(date +%Y-%m-%d)"
 	curl "https://prd.apis.rest.com.au/neo-prod-investments-basepath/neo/ws/investments/1.0.0/unitPrices?productType=Super&investmentOptionType=Cash,CapitalStable,Balanced,CoreStrategy,BalancedIndexed,SustainableGrowth,HighGrowth,AustralianSharesIndexed,OverseasSharesIndexed&from=1998-01-01&to=$$today" --fail --compressed | jq -re '["date", "name", "value"], (.Super[] | .validFromDate as $$date | .unitPrices[] | [$$date, .OptionCode, .Sell]) | @tsv' > $@
+
+caresuper: public/caresuper.csv ;
+public/caresuper.csv:
+	bash extract-caresuper.sh

@@ -38,6 +38,7 @@ def admin_fees():
         art = dict(fixed = 1.1*52, asset = 0.1/100, asset_max = 0.1/100*500_000),
         stake = dict(fixed = 1319, asset = 0, asset_max = 0),
         rest = dict(fixed = 1.5*52, asset = 0.1/100, asset_max = 600),
+        caresuper = dict(fixed = 67.6, asset = 0.15/100, asset_max = 750),
     )
     return (admin_fees,)
 
@@ -55,7 +56,7 @@ def forward_graph_controls(all_super_funds, direct_investment, mo, re):
     _names.sort()
     # show "best" performing funds by default
     #  _default = [name for perf, name in sorted(mean_performance)[-10:]]
-    _default = [x for x in _names if re.search('international shares|overseasshares|^balanced$', x.lower().partition('-')[2])]
+    _default = [x for x in _names if re.search('international shares|overseas|^balanced$', x.lower().partition('-')[2])]
     forward_selected_options = mo.ui.multiselect(options=_names, value=_default, label='Filter')
 
     _start = min(x['date'] for x in all_super_funds()).date()
@@ -142,7 +143,7 @@ def backward_graph_controls(all_super_funds, direct_investment, mo, re):
     _names.sort()
     # show "best" performing funds by default
     #  _default = [name for perf, name in sorted(mean_performance)[-10:]]
-    _default = [x for x in _names if re.search('international shares|overseasshares|^balanced$', x.lower().partition('-')[2])]
+    _default = [x for x in _names if re.search('international shares|overseas|^balanced$', x.lower().partition('-')[2])]
     backward_selected_options = mo.ui.multiselect(options=_names, value=_default, label='Filter')
 
     backward_y_log = mo.ui.checkbox(label='Log scale for y axis')
@@ -166,35 +167,15 @@ def backward_graph_controls(all_super_funds, direct_investment, mo, re):
 
 
 @app.cell(hide_code=True)
-def backward_graph(
-    all_super_funds,
-    alt,
-    backward_selected_options,
-    backward_y_log,
-    direct_investment,
-    ending_balance,
-    ending_contributions_freq_input,
-    ending_contributions_input,
-    ending_direct_investment_freq_input,
-    ending_direct_investment_min_input,
-    make_alldata,
-    make_graph,
-    mo,
-):
-    mo.ui.altair_chart(make_graph(
-        make_alldata(
-            all_super_funds(),
-            direct_investment,
-            balance=ending_balance.value,
-            direction=-1,
-            filter=backward_selected_options.value,
-            contributions=(ending_contributions_input.value, ending_contributions_freq_input.value),
-            direct_investment_buys=(ending_direct_investment_min_input.value, ending_direct_investment_freq_input.value),
-        ),
-        x=alt.X('date:T', scale=alt.Scale(reverse=True)),
-        y=alt.Y('balance:Q', scale=alt.Scale(reverse=True, type='symlog' if backward_y_log.value else 'linear', zero=False)),
-        color='name:N',
-    ))
+def backward_graph(backward_selected_options, make_backward_graph):
+    make_backward_graph(backward_selected_options.value)
+    return
+
+
+@app.cell(hide_code=True)
+def backward_di_vgs_graph(direct_investment, make_backward_graph):
+    _filter = [k for k in direct_investment if 'VGS' in k]
+    make_backward_graph(_filter)
     return
 
 
@@ -262,7 +243,7 @@ def direct_investment_early_sell_graph(
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def extra_code_below(mo):
     mo.md(r"""
     ## extra code below
     """)
@@ -270,9 +251,9 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(art, aussuper, hostplus, itertools, rest, unisuper):
+def _(art, aussuper, caresuper, hostplus, itertools, rest, unisuper):
     def all_super_funds():
-        return itertools.chain(art, aussuper, hostplus, unisuper, rest)
+        return itertools.chain(art, aussuper, hostplus, unisuper, rest, caresuper)
 
     return (all_super_funds,)
 
@@ -290,6 +271,43 @@ def _(alt, mo):
         )
 
     return (make_graph,)
+
+
+@app.cell
+def _(
+    all_super_funds,
+    alt,
+    backward_y_log,
+    direct_investment,
+    ending_balance,
+    ending_contributions_freq_input,
+    ending_contributions_input,
+    ending_direct_investment_freq_input,
+    ending_direct_investment_min_input,
+    make_alldata,
+    make_graph,
+    mo,
+):
+    def make_backward_graph(filter):
+        _data = make_alldata(
+            all_super_funds(),
+            direct_investment,
+            balance=ending_balance.value,
+            direction=-1,
+            filter=filter,
+            contributions=(ending_contributions_input.value, ending_contributions_freq_input.value),
+            direct_investment_buys=(ending_direct_investment_min_input.value, ending_direct_investment_freq_input.value),
+        )
+        _miny = min(x['balance'] for x in _data)
+        _miny -= 0.1 * abs(_miny)
+        return mo.ui.altair_chart(make_graph(
+            _data,
+            x=alt.X('date:T', scale=alt.Scale(reverse=True)),
+            y=alt.Y('balance:Q', scale=alt.Scale(reverse=True, type='symlog' if backward_y_log.value else 'linear', domainMin=_miny)),
+            color='name:N',
+        ))
+
+    return (make_backward_graph,)
 
 
 @app.function(hide_code=True)
@@ -419,6 +437,46 @@ def _(TAX, hostplus, rebalance_pooled):
 
 
 @app.cell(hide_code=True)
+def _(TAX, caresuper, rebalance_pooled):
+    def caresuper_dio(asset, state, numperiods=1, *, direction, make_purchase=0):
+        def brokerage(amount):
+            return max(11.99, 0.09225/100 * amount)
+
+        if isinstance(state, (int, float)):
+            pooled = max(state * 0.15, 6000)
+            shares, leftover, fee = state - pooled - 500, 0, 0
+            #  if direction == 1:
+                #  shares, leftover, fee = calc_brokerage(shares, brokerage)
+            return dict(
+                num_shares=shares/asset['value'],
+                pooled=pooled+leftover,
+                transaction=500,
+                total=state,
+                cost_base=shares + fee,
+            )
+
+        def total():
+            return state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
+
+        # interest on transaction account, use the rate from the cash option
+        interest = min((x for x in caresuper if x['name'] == 'caresuper-Cash'), key=lambda x: abs(x['date'] - asset['date']))
+        interest = interest['value'] ** (12 / numperiods)
+        state['transaction'] += state['transaction'] * (interest - 1) * (1 - TAX) * direction
+        if state['transaction'] < 500:
+            state['pooled'] -= 500 - state['transaction']
+            state['transaction'] = 500
+
+        state['pooled'] -= 264 / numperiods * direction
+        required_pooled = max(total() * 0.15, 6000)
+        state = rebalance_pooled(state, required_pooled, direction, asset, brokerage, make_purchase=make_purchase)
+
+        state['total'] = total()
+        return state
+
+    return (caresuper_dio,)
+
+
+@app.cell(hide_code=True)
 def _(rebalance_pooled):
     def stake_smsf(asset, state, numperiods=1, *, direction, make_purchase=0):
         def brokerage(amount):
@@ -533,6 +591,13 @@ def load_rest(csv, mo):
     _file = mo.notebook_location()/'public'/'rest.tsv'
     rest_raw = list(csv.DictReader(read_file(_file).decode().splitlines(), delimiter='\t'))
     return (rest_raw,)
+
+
+@app.cell(hide_code=True)
+def load_caresuper(csv, mo):
+    _file = mo.notebook_location()/'public'/'caresuper.csv'
+    caresuper_raw = list(csv.DictReader(read_file(_file).decode().splitlines()))
+    return (caresuper_raw,)
 
 
 @app.cell(hide_code=True)
@@ -679,6 +744,31 @@ def parse_aussuper(
 
     mo.ui.table(aussuper)
     return (aussuper,)
+
+
+@app.cell(hide_code=True)
+def parse_caresuper(caresuper_raw, datetime, itertools, mo):
+    caresuper = []
+
+    _raw = sorted(caresuper_raw, key=lambda x: x['PriceDate'])
+    _previous = _raw[0]
+
+    # weekly is too fine grained and causes too much data, turn it down
+    for _month, _group in itertools.groupby(_raw, key=lambda x: x['PriceDate'].rpartition('-')[0]):
+        _group = list(_group)
+        _date = datetime.datetime.strptime(_group[0]['PriceDate'], '%Y-%m-%d')
+        for _k in _group[0]:
+            if _k != 'PriceDate' and not _k.endswith('-Pension') and _previous[_k]:
+                caresuper.append({
+                    'fund': 'caresuper',
+                    'name': f'caresuper-{_k.removesuffix('-Superannuation')}',
+                    'value': float(_group[0][_k]) / float(_previous[_k]),
+                    'date': _date,
+                })
+        _previous = _group[0]
+
+    mo.ui.table(caresuper)
+    return (caresuper,)
 
 
 @app.cell(hide_code=True)
@@ -838,9 +928,11 @@ def _(CGT, TAX, datetime, sharesight_payouts, sharesight_prices):
 
 
 @app.cell(hide_code=True)
-def _(
+def make_direct_investment(
     admin_fees,
     aussuper,
+    caresuper,
+    caresuper_dio,
     choiceplus,
     datetime,
     hostplus,
@@ -849,9 +941,11 @@ def _(
 ):
     _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
     _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares']
+    _caresuper_pooled = [x for x in caresuper if x['name'] == 'caresuper-Overseas Shares']
     _stake_pooled = [{'date': datetime.datetime.min, 'value': 1}, {'date': datetime.datetime.max, 'value': 1}]
     _memberdirect = dict(direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled)
     _choiceplus = dict(direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled)
+    _caresuper_dio = dict(direct_investment_func=caresuper_dio, admin_fees=admin_fees['caresuper'], pooled_returns=_caresuper_pooled)
     _stake = dict(direct_investment_func=stake_smsf, admin_fees=admin_fees['stake'], pooled_returns=_stake_pooled)
     direct_investment = {
         'aussuper-memberdirect-VGS': dict(asset_code='VGS', **_memberdirect),
@@ -860,6 +954,9 @@ def _(
         'hostplus-choiceplus-VGS': dict(asset_code='VGS', **_choiceplus),
         'hostplus-choiceplus-VAS': dict(asset_code='VAS', **_choiceplus),
         'hostplus-choiceplus-IVV': dict(asset_code='IVV', **_choiceplus),
+        'caresuper-dio-VGS': dict(asset_code='VGS', **_caresuper_dio),
+        'caresuper-dio-VAS': dict(asset_code='VAS', **_caresuper_dio),
+        'caresuper-dio-IVV': dict(asset_code='IVV', **_caresuper_dio),
         'stake-smsf-VGS': dict(asset_code='VGS', **_stake),
         'stake-smsf-IVV': dict(asset_code='IVV', **_stake),
         'stake-smsf-VAS': dict(asset_code='VAS', **_stake),
