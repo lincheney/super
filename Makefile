@@ -4,7 +4,7 @@
 
 FIREFOX = Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0
 
-all: hostplus australiansuper ;
+all: hostplus australiansuper rest ;
 
 hostplus: public/hostplus.tsv ;
 public/hostplus.tsv:
@@ -28,6 +28,11 @@ public/sharesight/:
 public/sharesight.txt: public/sharesight/
 	ls public/sharesight/ -1 | sort > $@
 
-art: public/art.json ;
-public/art.json:
+art: public/art.tsv ;
+public/art.tsv:
 	bash -x extract-art.sh
+
+rest: public/rest.tsv ;
+public/rest.tsv:
+	today="$$(date +%Y-%m-%d)"
+	curl "https://prd.apis.rest.com.au/neo-prod-investments-basepath/neo/ws/investments/1.0.0/unitPrices?productType=Super&investmentOptionType=Cash,CapitalStable,Balanced,CoreStrategy,BalancedIndexed,SustainableGrowth,HighGrowth,AustralianSharesIndexed,OverseasSharesIndexed&from=1998-01-01&to=$$today" --fail --compressed | jq -re '["date", "name", "value"], (.Super[] | .validFromDate as $$date | .unitPrices[] | [$$date, .OptionCode, .Sell]) | @tsv' > $@

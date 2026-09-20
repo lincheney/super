@@ -37,6 +37,7 @@ def admin_fees():
         unisuper = dict(fixed = 0, asset = 2/100, asset_max = 96),
         art = dict(fixed = 1.1*52, asset = 0.1/100, asset_max = 0.1/100*500_000),
         stake = dict(fixed = 1319, asset = 0, asset_max = 0),
+        rest = dict(fixed = 1.5*52, asset = 0.1/100, asset_max = 600),
     )
     return (admin_fees,)
 
@@ -54,7 +55,7 @@ def forward_graph_controls(all_super_funds, direct_investment, mo, re):
     _names.sort()
     # show "best" performing funds by default
     #  _default = [name for perf, name in sorted(mean_performance)[-10:]]
-    _default = [x for x in _names if re.search('international shares|^balanced$', x.lower().partition('-')[2])]
+    _default = [x for x in _names if re.search('international shares|overseasshares|^balanced$', x.lower().partition('-')[2])]
     forward_selected_options = mo.ui.multiselect(options=_names, value=_default, label='Filter')
 
     _start = min(x['date'] for x in all_super_funds()).date()
@@ -141,7 +142,7 @@ def backward_graph_controls(all_super_funds, direct_investment, mo, re):
     _names.sort()
     # show "best" performing funds by default
     #  _default = [name for perf, name in sorted(mean_performance)[-10:]]
-    _default = [x for x in _names if re.search('international shares|^balanced$', x.lower().partition('-')[2])]
+    _default = [x for x in _names if re.search('international shares|overseasshares|^balanced$', x.lower().partition('-')[2])]
     backward_selected_options = mo.ui.multiselect(options=_names, value=_default, label='Filter')
 
     mo.vstack([
@@ -264,9 +265,9 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(art, aussuper, hostplus, itertools, unisuper):
+def _(art, aussuper, hostplus, itertools, rest, unisuper):
     def all_super_funds():
-        return itertools.chain(art, aussuper, hostplus, unisuper)
+        return itertools.chain(art, aussuper, hostplus, unisuper, rest)
 
     return (all_super_funds,)
 
@@ -523,6 +524,13 @@ def load_art(csv, mo):
 
 
 @app.cell(hide_code=True)
+def load_rest(csv, mo):
+    _file = mo.notebook_location()/'public'/'rest.tsv'
+    rest_raw = list(csv.DictReader(read_file(_file).decode().splitlines(), delimiter='\t'))
+    return (rest_raw,)
+
+
+@app.cell(hide_code=True)
 def parse_sharesight(datetime, sharesight_raw):
     sharesight_prices = {}
     sharesight_payouts = {}
@@ -595,6 +603,31 @@ def parse_art(art_raw, datetime, itertools, mo):
 
     mo.ui.table(art)
     return (art,)
+
+
+@app.cell(hide_code=True)
+def parse_rest(datetime, itertools, mo, rest_raw):
+    rest = []
+
+    for _name, _chart_iter in itertools.groupby(sorted(rest_raw, key=lambda x: (x['name'], x['date'])), key=lambda x: x['name']):
+        _chrest = [x for x in _chart_iter if float(x['value'])]
+
+        # daily is too fine grained and causes too much data, turn it down
+        _previous = float(_chrest[0]['value'])
+        for _month, _group in itertools.groupby(_chrest, key=lambda x: x['date'].rpartition('-')[0]):
+            _group = list(_group)
+            _point = _group[-1]
+            _value = float(_point['value'])
+            rest.append({
+                'fund': 'rest',
+                'name': f'rest-{_name}',
+                'value': _value / _previous,
+                'date': datetime.datetime.strptime(_point['date'].split('T')[0], '%Y-%m-%d'),
+            })
+            _previous = _value
+
+    mo.ui.table(rest)
+    return (rest,)
 
 
 @app.cell(hide_code=True)
