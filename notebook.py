@@ -371,26 +371,35 @@ def no_direct_investment(asset, state, numperiods=1, *, direction, make_purchase
 
 
 @app.cell(hide_code=True)
-def _(rebalance_pooled):
+def _(TAX, aussuper, rebalance_pooled):
     def memberdirect(asset, state, numperiods=1, *, direction, make_purchase=0):
         def brokerage(amount):
             return 10 + 0.08/100 * min(max(0, amount - 12_500), 50_000) + 0.04/100 * max(0, amount - 50_000)
 
         if isinstance(state, (int, float)):
-            shares, leftover, fee = state - 5000, 0, 0
+            shares, leftover, fee = state - 5000 - 400, 0, 0
             #  if direction == 1:
                 #  shares, leftover, fee = calc_brokerage(shares, brokerage)
             return dict(
                 num_shares=shares/asset['value'],
                 pooled=5000 + leftover,
+                transaction=400,
                 total=state,
                 cost_base=shares+fee,
             )
 
+        # interest on transaction account, use the rate from the cash option
+        interest = min((x for x in aussuper if x['name'] == 'aussuper-Cash'), key=lambda x: abs(x['date'] - asset['date']))
+        interest = interest['value'] ** (12 / numperiods)
+        state['transaction'] += state['transaction'] * (interest - 1) * (1 - TAX) * direction
+        if state['transaction'] < 400:
+            state['pooled'] -= 400 - state['transaction']
+            state['transaction'] = 400
+
         state['pooled'] -= 150 / numperiods * direction
         state = rebalance_pooled(state, 5000, direction, asset, brokerage, make_purchase=make_purchase)
 
-        state['total'] = state['num_shares'] * asset['value'] + state['pooled']
+        state['total'] = state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
         return state
 
     return (memberdirect,)
