@@ -154,6 +154,7 @@ def forward_graph_controls(all_super_funds, direct_investment, mo, re):
 def forward_graph(
     all_super_funds,
     allow_missing_data,
+    alt,
     datetime,
     direct_investment,
     forward_selected_options,
@@ -190,7 +191,7 @@ def forward_graph(
         _data,
         x='date:T',
         y='balance:Q',
-        color='name:N',
+        color=alt.Color('name:N').legend(orient='bottom', columns=3),
     ))
     return
 
@@ -417,7 +418,13 @@ def direct_investment_early_sell_graph(
     _chart = (
         alt.Chart(alt.InlineData(_quantiles))
         .mark_area(opacity=0.5)
-        .encode(x='elapsed:Q', y='lower:Q', y2='upper:Q', color='name:N', stroke='name:N')
+        .encode(
+            x='elapsed:Q',
+            y='lower:Q',
+            y2='upper:Q',
+            color=alt.Color('name:N').legend(orient='bottom', columns=3),
+            stroke='name:N'
+        )
     )
     mo.ui.altair_chart(
         _chart
@@ -489,7 +496,7 @@ def _(
             _data,
             x=alt.X('date:T', scale=alt.Scale(reverse=True)),
             y=alt.Y('balance:Q', scale=alt.Scale(reverse=True, type='symlog' if backward_y_log.value else 'linear', domainMin=_miny)),
-            color='name:N',
+            color=alt.Color('name:N').legend(orient='bottom', columns=3),
         ))
 
     return (make_backward_graph,)
