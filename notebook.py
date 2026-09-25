@@ -7,7 +7,7 @@
 
 import marimo
 
-__generated_with = "0.24.1"
+__generated_with = "0.24.2"
 app = marimo.App(width="medium")
 
 
@@ -29,6 +29,34 @@ def _():
     return CGT, TAX, alt, csv, datetime, itertools, json, mo, re, statistics
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Superannuation
+
+    Graphs for super.
+    Thinking about switching my super, but I want to look at not just fees but performance as well.
+    Also how does memberdirect/choiceplus etc. compare to the usual pooled options?
+
+    I'm not looking at all at insurance or additional things like that.
+
+    Right now I've got data for:
+    * Australian Super
+    * Hostplus
+    * Care Super
+    * Rest Super
+    * Australian Retirement Trust
+    * UniSuper
+
+    Disclaimers:
+    * Not financial advice
+    * Past performance is not an indication of future performance
+    * My maths may be wrong. At the very least it is a simplification of what happens in reality
+    * My understanding of tax may be wrong.
+    """)
+    return
+
+
 @app.cell
 def admin_fees():
     admin_fees = dict(
@@ -41,6 +69,27 @@ def admin_fees():
         caresuper = dict(fixed = 67.6, asset = 0.15/100, asset_max = 750),
     )
     return (admin_fees,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Forward graph
+
+    This is the "intuitive" graph that I'm not going to be using much.
+    It shows "if you invested $(insert-amount) at (insert-date) how much money would you have now",
+    but the problem is you have to set a reasonable start date and care about whether your super investment option
+    even existed at that point. If it didn't, you can include it anyway but it will show up with an unfair handicap
+    due to starting late. In fact if you go back far enough, the balanced options start looking really good -
+    but only because they've been around the longest.
+
+    The graph by default filters for "balanced" and "international shares" options.
+    Change it to see other things.
+    Or enable everything.
+
+    I don't know what's up with Rest Super Balanced and why it is so different from the other super funds' Balanced options.
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -131,6 +180,23 @@ def forward_graph(
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Backward graph
+
+    This graph is unintuitive but can work a bit better.
+    It shows "in order to get $(insert-amount) by now, what super balance would I have needed back 1 year ago, 2 years ago etc".
+    The axes are in reverse, so time goes backwards as you move to the right and the required super balance gets *lower* as you move up.
+    The *lower* the required super balance the *better*, since everyone ends with $1 mil, the less money I need to start with
+    the better. Its a lot more impressive to make $1 mil from a starting point of $100k than from $900k.
+
+    Anyway, I don't look much at the specific numbers, lines at the top are better, lines at the bottom are worse.
+    The main thing is this graph can go really far back in time without having to worry about a common starting date.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def backward_graph_controls(all_super_funds, direct_investment, mo, re):
     ending_balance = mo.ui.number(start=1, value=1_000_000, label="Ending balance $")
 
@@ -173,9 +239,112 @@ def backward_graph(backward_selected_options, make_backward_graph):
 
 
 @app.cell(hide_code=True)
-def backward_di_vgs_graph(direct_investment, make_backward_graph):
-    _filter = [k for k in direct_investment if 'VGS' in k]
-    make_backward_graph(_filter)
+def _(mo):
+    mo.md(r"""
+    ## Per super fund
+
+    A graph per super fund.
+    This makes it easy to see the "levels" of performance from
+    cash -> stable -> balanced -> growth -> international shares,
+    which is a pattern that is pretty consistent across all the funds.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(all_super_funds, mo):
+    _funds = sorted(set(k['fund'] for k in all_super_funds()))
+    fund_checkboxes = mo.ui.dictionary({f: mo.ui.checkbox(label=f, value=f==_funds[0]) for f in _funds})
+    mo.vstack(fund_checkboxes.values())
+    return (fund_checkboxes,)
+
+
+@app.cell(hide_code=True)
+def backward_graph_for_funds(
+    all_super_funds,
+    fund_checkboxes,
+    make_backward_graph,
+):
+    _graph = None
+    if _visible_funds := [f for f, c in fund_checkboxes.value.items() if c]:
+        _graph = make_backward_graph([k['name'] for k in all_super_funds() if k['fund'] in _visible_funds])
+    _graph
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Direct investment
+
+    Graph for Aus Super's Member Direct, Hostplus' ChoicePlus and Care Super's Direct Investment Option (DIO).
+    Also Stake SMSF because its a similar idea.
+    And Hostplus International Shares Indexed because its nice to use the "pooled fund benchmark" against VGS.
+
+    If you look at it closely, Member Direct and Stake SMSF are basically the same (with Member Direct being a *pixel* better)
+    and ChoicePlus and Care Super DIO slightly worse and then the pooled fund slightly worse than that.
+
+    > There's a slew of pros and cons for SMSF that I'm not going to look at here, this is only about returns.
+
+    If you have look at IVV instead, the differences are more pronounced.
+
+    > I've chosen these ETFs not as an endorsement but just to illustrate behaviour, e.g. IVV is only serving
+    > as an example of how each one is affected by historical outperformance vs VGS
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def etf_checkboxes(direct_investment, mo):
+    _etfs = sorted(x['asset_code'] for x in direct_investment.values())
+    etf_checkboxes = mo.ui.dictionary({f: mo.ui.checkbox(label=f, value=f=='VGS') for f in _etfs})
+    mo.vstack(etf_checkboxes.values())
+    return (etf_checkboxes,)
+
+
+@app.cell(hide_code=True)
+def backward_di_vgs_graph(
+    direct_investment,
+    etf_checkboxes,
+    make_backward_graph,
+):
+    _graph = None
+    if _visible_etfs := [f for f, c in etf_checkboxes.value.items() if c]:
+        _graph = make_backward_graph([k for k, v in direct_investment.items() if v['asset_code'] in _visible_etfs] + ['hostplus-International Shares - Indexed'])
+    _graph
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The simulations here are grossly simplified, e.g. in reality you would not be able to put your entire ChoicePlus balance into VGS
+    and it pretends you can use up all your money on fractional shares.
+
+    Each option uses their own international shares pooled fund for any mandatory pooled fund balance.
+
+    You may want to tweak the contributions and direct investment frequencies inputs from waaay above
+    to see what affect brokerage has (not that much).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Selling direct investment early
+
+    You should hold the direct investment until moving it into pension phase,
+    but what if you change your mind and sell it off and incur CGT?
+    How long until the extra growth is worth the extra fees (and CGT)?
+
+    This graph is dodgy. For each option I've taken a whole bunch of starting points
+    and gotten the balance Y after X years, then plotted the confidence interval (roughly)
+    against Hostplus International Shares Indexed as the benchmark.
+
+    It *seems* to show that direct investment (with VGS) does better *on average* after a couple years
+    but only starts peeling away around 5-6 years.
+    """)
     return
 
 
@@ -201,7 +370,7 @@ def direct_investment_early_sell_graph(
     _data = []
     _grid = list(direct_investment.items()) + [_hostplus_pooled]
     for _name, _kwargs in _grid:
-        if 'VAS' in _name or 'stake' in _name:
+        if 'VAS' in _name or 'stake' in _name or 'STW' in _name:
             continue
         _mindate = next(itertools.islice(make_data(_name, balance=starting_balance.value, direction=1, initial_date=_long_ago, **_kwargs), 1, 2))['date']
         for _year in range(fy_of_date(_mindate), fy_of_date(datetime.date.today())):
@@ -273,7 +442,7 @@ def _(alt, mo):
     return (make_graph,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     all_super_funds,
     alt,
@@ -630,6 +799,9 @@ def parse_sharesight(datetime, sharesight_raw):
     for _row in sharesight_prices['IVV']:
         if _row['date'] >= datetime.datetime(2022, 12, 9):
             _row['value'] *= 15
+    for _row in sharesight_prices['IOO']:
+        if _row['date'] > datetime.datetime(2018, 5, 3):
+            _row['value'] *= 2
     return sharesight_payouts, sharesight_prices
 
 
@@ -948,27 +1120,44 @@ def make_direct_investment(
     memberdirect,
     stake_smsf,
 ):
-    _aussuper_pooled = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
-    _hostplus_pooled = [x for x in hostplus if x['name'] == 'hostplus-International Shares']
-    _caresuper_pooled = [x for x in caresuper if x['name'] == 'caresuper-Overseas Shares']
+
+    _aussuper_int = [x for x in aussuper if x['name'] == 'aussuper-International Shares']
+    _hostplus_int = [x for x in hostplus if x['name'] == 'hostplus-International Shares']
+    _caresuper_int = [x for x in caresuper if x['name'] == 'caresuper-Overseas Shares']
+    _aussuper_aus = [x for x in aussuper if x['name'] == 'aussuper-Australian Shares']
+    _hostplus_aus = [x for x in hostplus if x['name'] == 'hostplus-Australian Shares']
+    _caresuper_aus = [x for x in caresuper if x['name'] == 'caresuper-Australian Shares']
     _stake_pooled = [{'date': datetime.datetime.min, 'value': 1}, {'date': datetime.datetime.max, 'value': 1}]
-    _memberdirect = dict(direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_pooled)
-    _choiceplus = dict(direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_pooled)
-    _caresuper_dio = dict(direct_investment_func=caresuper_dio, admin_fees=admin_fees['caresuper'], pooled_returns=_caresuper_pooled)
+
+    _memberdirect_int = dict(direct_investment_func=memberdirect, admin_fees=admin_fees['aussuper'], pooled_returns=_aussuper_int)
+    _choiceplus_int = dict(direct_investment_func=choiceplus, admin_fees=admin_fees['hostplus'], pooled_returns=_hostplus_int)
+    _caresuper_dio_int = dict(direct_investment_func=caresuper_dio, admin_fees=admin_fees['caresuper'], pooled_returns=_caresuper_int)
+    _memberdirect_aus = {**_memberdirect_int, 'pooled_returns': _aussuper_aus}
+    _choiceplus_aus = {**_choiceplus_int, 'pooled_returns': _hostplus_aus}
+    _caresuper_dio_aus = {**_caresuper_dio_int, 'pooled_returns': _caresuper_aus}
     _stake = dict(direct_investment_func=stake_smsf, admin_fees=admin_fees['stake'], pooled_returns=_stake_pooled)
+
     direct_investment = {
-        'aussuper-memberdirect-VGS': dict(asset_code='VGS', **_memberdirect),
-        'aussuper-memberdirect-VAS': dict(asset_code='VAS', **_memberdirect),
-        'aussuper-memberdirect-IVV': dict(asset_code='IVV', **_memberdirect),
-        'hostplus-choiceplus-VGS': dict(asset_code='VGS', **_choiceplus),
-        'hostplus-choiceplus-VAS': dict(asset_code='VAS', **_choiceplus),
-        'hostplus-choiceplus-IVV': dict(asset_code='IVV', **_choiceplus),
-        'caresuper-dio-VGS': dict(asset_code='VGS', **_caresuper_dio),
-        'caresuper-dio-VAS': dict(asset_code='VAS', **_caresuper_dio),
-        'caresuper-dio-IVV': dict(asset_code='IVV', **_caresuper_dio),
+        'aussuper-memberdirect-VGS': dict(asset_code='VGS', **_memberdirect_int),
+        'aussuper-memberdirect-VAS': dict(asset_code='VAS', **_memberdirect_int),
+        'aussuper-memberdirect-IVV': dict(asset_code='IVV', **_memberdirect_int),
+        'aussuper-memberdirect-IOO': dict(asset_code='IOO', **_memberdirect_int),
+        #  'aussuper-memberdirect-STW': dict(asset_code='STW', **_memberdirect_aus),
+        'hostplus-choiceplus-VGS': dict(asset_code='VGS', **_choiceplus_int),
+        'hostplus-choiceplus-VAS': dict(asset_code='VAS', **_choiceplus_int),
+        'hostplus-choiceplus-IVV': dict(asset_code='IVV', **_choiceplus_int),
+        'hostplus-choiceplus-IOO': dict(asset_code='IOO', **_choiceplus_int),
+        #  'hostplus-choiceplus-STW': dict(asset_code='STW', **_choiceplus_aus),
+        'caresuper-dio-VGS': dict(asset_code='VGS', **_caresuper_dio_int),
+        'caresuper-dio-VAS': dict(asset_code='VAS', **_caresuper_dio_int),
+        'caresuper-dio-IVV': dict(asset_code='IVV', **_caresuper_dio_int),
+        'caresuper-dio-IOO': dict(asset_code='IOO', **_caresuper_dio_int),
+        #  'caresuper-dio-STW': dict(asset_code='STW', **_caresuper_dio_aus),
         'stake-smsf-VGS': dict(asset_code='VGS', **_stake),
-        'stake-smsf-IVV': dict(asset_code='IVV', **_stake),
         'stake-smsf-VAS': dict(asset_code='VAS', **_stake),
+        'stake-smsf-IVV': dict(asset_code='IVV', **_stake),
+        'stake-smsf-IOO': dict(asset_code='IOO', **_stake),
+        #  'stake-smsf-STW': dict(asset_code='STW', **_stake),
     }
     return (direct_investment,)
 
