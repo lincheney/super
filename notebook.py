@@ -41,8 +41,8 @@ def _(mo):
     I'm not looking at all at insurance or additional things like that.
 
     Right now I've got data for:
-    * Australian Super
-    * Hostplus
+    * Australian Super (using fees from 2026-10-10)
+    * Hostplus (using fees from 2026-09-30)
     * Care Super
     * Rest Super
     * Australian Retirement Trust
@@ -68,6 +68,9 @@ def admin_fees():
         rest = dict(fixed = 1.5*52, asset = 0.1/100, asset_max = 600),
         caresuper = dict(fixed = 67.6, asset = 0.15/100, asset_max = 750),
     )
+    MEMBERDIRECT_PLATFORM_FEE = 150
+    CHOICEPLUS_PLATFORM_FEE = 150
+    CARESUPER_DIO_PLATFORM_FEE = 264
     return (admin_fees,)
 
 
@@ -565,7 +568,7 @@ def _(TAX, aussuper, rebalance_pooled):
             state['pooled'] -= 400 - state['transaction']
             state['transaction'] = 400
 
-        state['pooled'] -= 150 / numperiods * direction
+        state['pooled'] -= MEMBERDIRECT_PLATFORM_FEE / numperiods * direction
         state = rebalance_pooled(state, 5000, direction, asset, brokerage, make_purchase=make_purchase)
 
         state['total'] = state['num_shares'] * asset['value'] + state['pooled'] + state['transaction']
@@ -604,7 +607,7 @@ def _(TAX, hostplus, rebalance_pooled):
             state['pooled'] -= 200 - state['transaction']
             state['transaction'] = 200
 
-        state['pooled'] -= 168 / numperiods * direction
+        state['pooled'] -= CHOICEPLUS_PLATFORM_FEE / numperiods * direction
         required_pooled = max(total() * 0.2, 2000)
         state = rebalance_pooled(state, required_pooled, direction, asset, brokerage, make_purchase=make_purchase)
 
@@ -644,7 +647,7 @@ def _(TAX, caresuper, rebalance_pooled):
             state['pooled'] -= 500 - state['transaction']
             state['transaction'] = 500
 
-        state['pooled'] -= 264 / numperiods * direction
+        state['pooled'] -= CARESUPER_DIO_PLATFORM_FEE / numperiods * direction
         required_pooled = max(total() * 0.15, 6000)
         state = rebalance_pooled(state, required_pooled, direction, asset, brokerage, make_purchase=make_purchase)
 
