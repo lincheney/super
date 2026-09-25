@@ -53,6 +53,14 @@ def _(mo):
     * Past performance is not an indication of future performance
     * My maths may be wrong. At the very least it is a simplification of what happens in reality
     * My understanding of tax may be wrong.
+
+    Things not accounted for (yet):
+    * TBC
+    * Div 296
+
+    Other great resources:
+    * <https://lazykoalainvesting.com/>
+    * <https://passiveinvestingaustralia.com/category/superannuation/>
     """)
     return
 
@@ -71,7 +79,12 @@ def admin_fees():
     MEMBERDIRECT_PLATFORM_FEE = 150
     CHOICEPLUS_PLATFORM_FEE = 150
     CARESUPER_DIO_PLATFORM_FEE = 264
-    return (admin_fees,)
+    return (
+        CARESUPER_DIO_PLATFORM_FEE,
+        CHOICEPLUS_PLATFORM_FEE,
+        MEMBERDIRECT_PLATFORM_FEE,
+        admin_fees,
+    )
 
 
 @app.cell(hide_code=True)
@@ -543,7 +556,7 @@ def no_direct_investment(asset, state, numperiods=1, *, direction, make_purchase
 
 
 @app.cell(hide_code=True)
-def _(TAX, aussuper, rebalance_pooled):
+def _(MEMBERDIRECT_PLATFORM_FEE, TAX, aussuper, rebalance_pooled):
     def memberdirect(asset, state, numperiods=1, *, direction, make_purchase=0):
         def brokerage(amount):
             return 10 + 0.08/100 * min(max(0, amount - 12_500), 50_000) + 0.04/100 * max(0, amount - 50_000)
@@ -578,7 +591,7 @@ def _(TAX, aussuper, rebalance_pooled):
 
 
 @app.cell(hide_code=True)
-def _(TAX, hostplus, rebalance_pooled):
+def _(CHOICEPLUS_PLATFORM_FEE, TAX, hostplus, rebalance_pooled):
     def choiceplus(asset, state, numperiods=1, *, direction, make_purchase=0):
         def brokerage(amount):
             return 13 + 0.1/100 * max(0, amount - 13_000)
@@ -618,7 +631,7 @@ def _(TAX, hostplus, rebalance_pooled):
 
 
 @app.cell(hide_code=True)
-def _(TAX, caresuper, rebalance_pooled):
+def _(CARESUPER_DIO_PLATFORM_FEE, TAX, caresuper, rebalance_pooled):
     def caresuper_dio(asset, state, numperiods=1, *, direction, make_purchase=0):
         def brokerage(amount):
             return max(11.99, 0.09225/100 * amount)
