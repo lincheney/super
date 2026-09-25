@@ -33,7 +33,7 @@ jobs:
       # Run the build script to export notebooks to WebAssembly
       - name: Export notebooks
         run: |
-          uvx marimo export html-wasm notebook.py -o _site --mode edit --no-sandbox
+          uvx marimo export html-wasm notebook.py -o _site --mode edit --no-sandbox --execute
           cp -r public _site
 
       # Upload the generated site as an artifact for the deploy job
