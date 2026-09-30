@@ -601,7 +601,13 @@ def _(MEMBERDIRECT_PLATFORM_FEE, TAX, aussuper, rebalance_pooled):
 def _(CHOICEPLUS_PLATFORM_FEE, TAX, hostplus, rebalance_pooled):
     def choiceplus(asset, state, numperiods=1, *, direction, make_purchase=0):
         def brokerage(amount):
-            return 13 + 0.1/100 * max(0, amount - 13_000)
+            if amount <= 6_500:
+                return 5
+            if amount <= 13_000:
+                return 10
+            if amount <= 50_000:
+                return 10 + 0.07/100 * (amount - 13_000)
+            return 35.90 + 0.03/100 * (amount - 50_000)
 
         if isinstance(state, (int, float)):
             pooled = max(state * 0.2, 2000)
