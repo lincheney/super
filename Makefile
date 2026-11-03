@@ -8,15 +8,17 @@ all: hostplus australiansuper rest ;
 
 hostplus: public/hostplus.tsv ;
 public/hostplus.tsv:
+	today="$$(date +%Y-%m-%d)"
 	# https://hostplus.com.au/members/our-products-and-services/investment-options/investment-returns
 	auth_token="$$(curl https://hostplus.com.au/content/hostplus-program/home/members/our-products-and-services/investment-options/investment-returns.irm.auth.json | jq -re .)"
-	curl 'https://hostplus.com.au/content/hostplus-program/home/members/our-products-and-services/investment-options/investment-returns.irm.returnscompare.json?InvestmentProduct=13&frequencyType=2&Startdate=1980-01-01&Enddate=2026-09-16&OptionsToCompare=ALL' --compressed -H 'Content-Type: application/json' -H "IRM-Authorization: Bearer $$auth_token" --compressed --fail | jq -re '["date", "name", "return"], (.msg.MonthlyOptions[] | [.MonthEndDate, .OptionName, .Return]) | @tsv' >$@
+	curl "https://hostplus.com.au/content/hostplus-program/home/members/our-products-and-services/investment-options/investment-returns.irm.returnscompare.json?InvestmentProduct=13&frequencyType=2&Startdate=1980-01-01&Enddate=$$today&OptionsToCompare=ALL" --compressed -H 'Content-Type: application/json' -H "IRM-Authorization: Bearer $$auth_token" --compressed --fail | jq -re '["date", "name", "return"], (.msg.MonthlyOptions[] | [.MonthEndDate, .OptionName, .Return]) | @tsv' >$@
 
 australiansuper: public/australiansuper.csv public/australiansuper-daily.csv ;
 public/australiansuper.csv:
 	curl 'https://www.australiansuper.com/api/graphs/annualrates/graph/download/super' -H 'User-Agent: ${FIREFOX}' --compressed --fail -o $@
 public/australiansuper-daily.csv:
-	curl 'https://www.australiansuper.com//api/graphs/dailyrates/download/?start=01/07/2008&end=15/09/2026&cumulative=False&superType=super&truncateDecimalPlaces=True&outputFilename=Daily%20Rates%2001%20Jul%202008%20-%2015%20Sep%202026.csv' -H 'User-Agent: ${FIREFOX}' --compressed --fail -o $@
+	today="$$(date +%d/%m/%Y)"
+	curl "https://www.australiansuper.com//api/graphs/dailyrates/download/?start=01/07/2008&end=$$today&cumulative=False&superType=super&truncateDecimalPlaces=True&outputFilename=Daily%20Rates%2001%20Jul%202008%20-%2015%20Sep%202026.csv" -H 'User-Agent: ${FIREFOX}' --compressed --fail | tr \\r \\n > $@
 
 unisuper: public/unisuper.tsv ;
 public/unisuper.tsv:

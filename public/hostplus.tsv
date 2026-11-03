@@ -1,4 +1,48 @@
 date	name	return
+2026-09-30T00:00:00	Stable	-0.4800
+2026-09-30T00:00:00	Conservative	-0.5600
+2026-09-30T00:00:00	SRI - Balanced	-0.6100
+2026-09-30T00:00:00	Indexed Balanced	-0.4200
+2026-09-30T00:00:00	Balanced	-0.5400
+2026-09-30T00:00:00	Growth	-0.6700
+2026-09-30T00:00:00	Cash	0.3600
+2026-09-30T00:00:00	Bonds	-1.4200
+2026-09-30T00:00:00	Australian Shares	-2.8400
+2026-09-30T00:00:00	International Shares	0.1800
+2026-09-30T00:00:00	International Shares - Indexed	1.8400
+2026-09-30T00:00:00	Bonds – Indexed	-1.1800
+2026-09-30T00:00:00	Australian Shares – Indexed	-2.1200
+2026-09-30T00:00:00	Defensive	-0.3700
+2026-09-30T00:00:00	Indexed Defensive	-0.1400
+2026-09-30T00:00:00	SRI - Defensive	-0.3000
+2026-09-30T00:00:00	High Growth	-0.8800
+2026-09-30T00:00:00	Indexed High Growth	-0.1700
+2026-09-30T00:00:00	SRI - High Growth	-0.7600
+2026-09-30T00:00:00	Indexed Growth 	-0.3800
+2026-09-30T00:00:00	Indexed Conservative	-0.4000
+2026-09-30T00:00:00	Indexed Stable	-0.4100
+2026-09-30T00:00:00	Stable	-0.4800
+2026-09-30T00:00:00	Conservative	-0.5600
+2026-09-30T00:00:00	SRI - Balanced	-0.6100
+2026-09-30T00:00:00	Indexed Balanced	-0.4200
+2026-09-30T00:00:00	Balanced	-0.5400
+2026-09-30T00:00:00	Growth	-0.6700
+2026-09-30T00:00:00	Cash	0.3600
+2026-09-30T00:00:00	Bonds	-1.4200
+2026-09-30T00:00:00	Australian Shares	-2.8400
+2026-09-30T00:00:00	International Shares	0.1800
+2026-09-30T00:00:00	International Shares - Indexed	1.8400
+2026-09-30T00:00:00	Bonds – Indexed	-1.1800
+2026-09-30T00:00:00	Australian Shares – Indexed	-2.1200
+2026-09-30T00:00:00	Defensive	-0.3700
+2026-09-30T00:00:00	Indexed Defensive	-0.1400
+2026-09-30T00:00:00	SRI - Defensive	-0.3000
+2026-09-30T00:00:00	High Growth	-0.8800
+2026-09-30T00:00:00	Indexed High Growth	-0.1700
+2026-09-30T00:00:00	SRI - High Growth	-0.7600
+2026-09-30T00:00:00	Indexed Growth 	-0.3800
+2026-09-30T00:00:00	Indexed Conservative	-0.4000
+2026-09-30T00:00:00	Indexed Stable	-0.4100
 2026-08-31T00:00:00	Stable	0.6400
 2026-08-31T00:00:00	Conservative	1.0100
 2026-08-31T00:00:00	SRI - Balanced	0.5200
